@@ -1,0 +1,131 @@
+id: "healthcare-members-v1"
+name: "Healthcare Member Data Contract"
+version: "1.0.0"
+owner_team: "member-analytics"
+status: "active"
+kind: "DataContract"
+apiVersion: "v3.0.2"
+domain_name: "Member & Analytics"
+description:
+  purpose: "Comprehensive member profiles including demographics, eligibility, and plan enrollment"
+  usage: "Member services, eligibility verification, care coordination, and analytics"
+  limitations: "PHI data - restricted access. HIPAA compliance required. Email/phone PII must be masked in non-production environments."
+
+schema:
+  - name: members
+    physicalName: "member.member_profiles"
+    properties:
+      - name: member_id
+        logicalType: string
+        required: true
+        unique: true
+        description: "Unique member identifier (UUID format)"
+        classification: "PHI"
+
+      - name: subscriber_id
+        logicalType: string
+        required: true
+        description: "Primary subscriber identifier (if dependent)"
+        classification: "PHI"
+
+      - name: first_name
+        logicalType: string
+        required: true
+        description: "Member first name"
+        classification: "PHI"
+
+      - name: last_name
+        logicalType: string
+        required: true
+        description: "Member last name"
+        classification: "PHI"
+
+      - name: date_of_birth
+        logicalType: date
+        required: true
+        description: "Member date of birth (YYYY-MM-DD)"
+        classification: "PHI"
+
+      - name: gender
+        logicalType: string
+        required: true
+        description: "Gender: M, F, X, U (unknown)"
+
+      - name: email
+        logicalType: string
+        required: false
+        description: "Primary email address"
+        classification: "PHI"
+
+      - name: phone_number
+        logicalType: string
+        required: false
+        description: "Primary phone number (E.164 format)"
+        classification: "PHI"
+
+      - name: address_line1
+        logicalType: string
+        required: true
+        description: "Street address line 1"
+        classification: "PHI"
+
+      - name: address_line2
+        logicalType: string
+        required: false
+        description: "Street address line 2"
+        classification: "PHI"
+
+      - name: city
+        logicalType: string
+        required: true
+        description: "City"
+
+      - name: state
+        logicalType: string
+        required: true
+        description: "US state code (2-letter)"
+
+      - name: zip_code
+        logicalType: string
+        required: true
+        description: "5 or 9-digit ZIP code"
+
+      - name: plan_id
+        logicalType: string
+        required: true
+        description: "Current health plan identifier"
+
+      - name: enrollment_date
+        logicalType: date
+        required: true
+        description: "Plan enrollment start date"
+
+      - name: termination_date
+        logicalType: date
+        required: false
+        description: "Plan enrollment end date (null if active)"
+
+      - name: member_status
+        logicalType: string
+        required: true
+        description: "Status: active, inactive, terminated, pending"
+
+      - name: primary_care_provider_npi
+        logicalType: string
+        required: false
+        description: "Assigned PCP's National Provider Identifier"
+
+      - name: risk_score
+        logicalType: decimal
+        required: false
+        description: "HCC Risk Adjustment Factor (RAF) score"
+
+      - name: created_at
+        logicalType: timestamp
+        required: true
+        description: "Record creation timestamp (UTC)"
+
+      - name: updated_at
+        logicalType: timestamp
+        required: true
+        description: "Record last update timestamp (UTC)"

@@ -1,0 +1,108 @@
+id: "healthcare-quality-measures-v1"
+name: "Healthcare Quality Measures Data Contract"
+version: "1.0.0"
+owner_team: "clinical-data-science"
+status: "active"
+kind: "DataContract"
+apiVersion: "v3.0.2"
+domain_name: "Clinical"
+description:
+  purpose: "HEDIS and Star Ratings quality measure results for members"
+  usage: "Quality reporting, Star Ratings submission, provider performance, care gap identification"
+  limitations: "Updated monthly. NCQA specifications must be followed. Historical data retained 5 years."
+
+schema:
+  - name: quality_measures
+    physicalName: "quality.hedis_measures"
+    properties:
+      - name: measure_id
+        logicalType: string
+        required: true
+        unique: true
+        description: "Unique measure record identifier"
+
+      - name: member_id
+        logicalType: string
+        required: true
+        description: "Member identifier"
+        classification: "PHI"
+
+      - name: measurement_year
+        logicalType: integer
+        required: true
+        description: "HEDIS measurement year"
+
+      - name: measure_code
+        logicalType: string
+        required: true
+        description: "HEDIS measure code (e.g., CDC, CBP, BCS)"
+
+      - name: measure_name
+        logicalType: string
+        required: true
+        description: "Measure name (e.g., Comprehensive Diabetes Care)"
+
+      - name: measure_category
+        logicalType: string
+        required: true
+        description: "Category: effectiveness_of_care, access_availability, member_experience"
+
+      - name: numerator_compliant
+        logicalType: boolean
+        required: true
+        description: "Whether member met numerator criteria"
+
+      - name: denominator_eligible
+        logicalType: boolean
+        required: true
+        description: "Whether member is in denominator"
+
+      - name: exclusion_applied
+        logicalType: boolean
+        required: true
+        description: "Whether member was excluded"
+
+      - name: exclusion_reason
+        logicalType: string
+        required: false
+        description: "Reason for exclusion"
+
+      - name: compliance_date
+        logicalType: date
+        required: false
+        description: "Date numerator criteria met"
+
+      - name: gap_status
+        logicalType: string
+        required: true
+        description: "Status: compliant, gap, excluded, not_eligible"
+
+      - name: gap_closure_date
+        logicalType: date
+        required: false
+        description: "Expected gap closure date"
+
+      - name: star_rating_impact
+        logicalType: boolean
+        required: true
+        description: "Whether measure impacts Star Ratings"
+
+      - name: provider_npi
+        logicalType: string
+        required: false
+        description: "Attributed provider NPI"
+
+      - name: calculated_at
+        logicalType: timestamp
+        required: true
+        description: "When measure was calculated (UTC)"
+
+      - name: created_at
+        logicalType: timestamp
+        required: true
+        description: "Record creation timestamp (UTC)"
+
+      - name: updated_at
+        logicalType: timestamp
+        required: true
+        description: "Record last update timestamp (UTC)"

@@ -1,0 +1,129 @@
+id: "healthcare-claims-v1"
+name: "Healthcare Claims Data Contract"
+version: "1.0.0"
+owner_team: "claims-engineering"
+status: "active"
+kind: "DataContract"
+apiVersion: "v3.0.2"
+domain_name: "Claims & Operations"
+description:
+  purpose: "Standardized claims data including professional and institutional claims for adjudication and analytics"
+  usage: "Claims processing, payment, reporting, fraud detection, and member cost analysis"
+  limitations: "PHI data - restricted access. Retain 7 years per regulatory requirements. Diagnosis and procedure codes must be valid ICD-10/CPT."
+
+schema:
+  - name: claims
+    physicalName: "claims.adjudicated_claims"
+    properties:
+      - name: claim_id
+        logicalType: string
+        required: true
+        unique: true
+        description: "Unique claim identifier (internal)"
+
+      - name: claim_number
+        logicalType: string
+        required: true
+        unique: true
+        description: "External claim number (from EDI 837)"
+
+      - name: claim_type
+        logicalType: string
+        required: true
+        description: "Claim type: professional, institutional, dental, pharmacy"
+
+      - name: member_id
+        logicalType: string
+        required: true
+        description: "Member identifier (links to members table)"
+        classification: "PHI"
+
+      - name: provider_npi
+        logicalType: string
+        required: true
+        description: "National Provider Identifier (10-digit)"
+
+      - name: service_date_from
+        logicalType: date
+        required: true
+        description: "Service start date (YYYY-MM-DD)"
+
+      - name: service_date_to
+        logicalType: date
+        required: true
+        description: "Service end date (YYYY-MM-DD)"
+
+      - name: received_date
+        logicalType: date
+        required: true
+        description: "Date claim received by payor"
+
+      - name: processed_date
+        logicalType: date
+        required: false
+        description: "Date claim was adjudicated"
+
+      - name: paid_date
+        logicalType: date
+        required: false
+        description: "Date claim was paid"
+
+      - name: claim_status
+        logicalType: string
+        required: true
+        description: "Status: submitted, pending, approved, denied, adjusted"
+
+      - name: diagnosis_codes
+        logicalType: array
+        required: true
+        description: "Array of ICD-10 diagnosis codes"
+
+      - name: procedure_codes
+        logicalType: array
+        required: true
+        description: "Array of CPT/HCPCS procedure codes"
+
+      - name: billed_amount
+        logicalType: decimal
+        required: true
+        description: "Total amount billed by provider (USD)"
+
+      - name: allowed_amount
+        logicalType: decimal
+        required: true
+        description: "Total allowed amount per contract (USD)"
+
+      - name: paid_amount
+        logicalType: decimal
+        required: false
+        description: "Total amount paid to provider (USD)"
+
+      - name: member_responsibility
+        logicalType: decimal
+        required: false
+        description: "Member cost-sharing (copay + coinsurance + deductible)"
+
+      - name: network_status
+        logicalType: string
+        required: true
+        description: "Provider network status: in_network, out_of_network, preferred"
+
+      - name: place_of_service
+        logicalType: string
+        required: true
+        description: "Place of service code (e.g., 11=Office, 21=Inpatient Hospital)"
+
+      - name: denial_reason_code
+        logicalType: string
+        required: false
+        description: "Reason code if claim denied"
+
+      - name: created_at
+        logicalType: timestamp
+        required: true
+        description: "Record creation timestamp (UTC)"
+
+      - name: updated_at
+        logicalType: timestamp
+        required: true
+        description: "Record last update timestamp (UTC)"

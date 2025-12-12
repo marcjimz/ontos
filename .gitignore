@@ -39,3 +39,4 @@ test-results/
 # License check outputs
 licenses.json
 licenses.csv
+.claude-flow*

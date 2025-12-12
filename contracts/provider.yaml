@@ -1,0 +1,128 @@
+id: "healthcare-providers-v1"
+name: "Healthcare Provider Network Data Contract"
+version: "1.0.0"
+owner_team: "claims-engineering"
+status: "active"
+kind: "DataContract"
+apiVersion: "v3.0.2"
+domain_name: "Claims & Operations"
+description:
+  purpose: "Provider network directory with credentials, specialties, and contract details"
+  usage: "Claims processing, provider search, network adequacy analysis, credentialing"
+  limitations: "Provider data must be updated quarterly. NPI validation required. Contract rates are confidential."
+
+schema:
+  - name: providers
+    physicalName: "provider.provider_directory"
+    properties:
+      - name: provider_id
+        logicalType: string
+        required: true
+        unique: true
+        description: "Internal provider identifier"
+
+      - name: npi
+        logicalType: string
+        required: true
+        unique: true
+        description: "National Provider Identifier (10-digit)"
+
+      - name: provider_type
+        logicalType: string
+        required: true
+        description: "Type: individual, facility, organization"
+
+      - name: first_name
+        logicalType: string
+        required: false
+        description: "Provider first name (for individuals)"
+
+      - name: last_name
+        logicalType: string
+        required: false
+        description: "Provider last name (for individuals)"
+
+      - name: organization_name
+        logicalType: string
+        required: false
+        description: "Organization/facility name"
+
+      - name: specialty_code
+        logicalType: string
+        required: true
+        description: "Primary specialty (taxonomy code)"
+
+      - name: specialty_description
+        logicalType: string
+        required: true
+        description: "Specialty description (e.g., Internal Medicine)"
+
+      - name: network_status
+        logicalType: string
+        required: true
+        description: "Status: in_network, out_of_network, preferred, terminated"
+
+      - name: contract_start_date
+        logicalType: date
+        required: false
+        description: "Network contract start date"
+
+      - name: contract_end_date
+        logicalType: date
+        required: false
+        description: "Network contract end date"
+
+      - name: accepting_new_patients
+        logicalType: boolean
+        required: true
+        description: "Whether provider is accepting new patients"
+
+      - name: address_line1
+        logicalType: string
+        required: true
+        description: "Primary practice address line 1"
+
+      - name: address_line2
+        logicalType: string
+        required: false
+        description: "Primary practice address line 2"
+
+      - name: city
+        logicalType: string
+        required: true
+        description: "City"
+
+      - name: state
+        logicalType: string
+        required: true
+        description: "US state code (2-letter)"
+
+      - name: zip_code
+        logicalType: string
+        required: true
+        description: "5 or 9-digit ZIP code"
+
+      - name: phone_number
+        logicalType: string
+        required: true
+        description: "Primary phone number"
+
+      - name: credentialing_status
+        logicalType: string
+        required: true
+        description: "Status: credentialed, pending, expired, suspended"
+
+      - name: credentialing_date
+        logicalType: date
+        required: false
+        description: "Most recent credentialing date"
+
+      - name: created_at
+        logicalType: timestamp
+        required: true
+        description: "Record creation timestamp (UTC)"
+
+      - name: updated_at
+        logicalType: timestamp
+        required: true
+        description: "Record last update timestamp (UTC)"

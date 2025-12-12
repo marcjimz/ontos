@@ -1,0 +1,124 @@
+id: "healthcare-clinical-events-v1"
+name: "Healthcare Clinical Events Data Contract"
+version: "1.0.0"
+owner_team: "clinical-data-science"
+status: "active"
+kind: "DataContract"
+apiVersion: "v3.0.2"
+domain_name: "Clinical"
+description:
+  purpose: "Clinical events including diagnoses, procedures, medications, and lab results for care management"
+  usage: "Risk stratification, care gap analysis, predictive modeling, quality measures"
+  limitations: "PHI data - highly restricted. Real-time feed has 2-hour lag. Codes must be valid per coding standards."
+
+schema:
+  - name: clinical_events
+    physicalName: "clinical.member_clinical_events"
+    properties:
+      - name: event_id
+        logicalType: string
+        required: true
+        unique: true
+        description: "Unique clinical event identifier"
+        classification: "PHI"
+
+      - name: member_id
+        logicalType: string
+        required: true
+        description: "Member identifier"
+        classification: "PHI"
+
+      - name: event_date
+        logicalType: date
+        required: true
+        description: "Date of clinical event"
+
+      - name: event_type
+        logicalType: string
+        required: true
+        description: "Type: diagnosis, procedure, medication, lab_result, hospitalization"
+
+      - name: icd10_code
+        logicalType: string
+        required: false
+        description: "ICD-10 diagnosis code"
+
+      - name: icd10_description
+        logicalType: string
+        required: false
+        description: "Diagnosis description"
+
+      - name: cpt_code
+        logicalType: string
+        required: false
+        description: "CPT/HCPCS procedure code"
+
+      - name: cpt_description
+        logicalType: string
+        required: false
+        description: "Procedure description"
+
+      - name: medication_ndc
+        logicalType: string
+        required: false
+        description: "NDC (National Drug Code) for medications"
+
+      - name: medication_name
+        logicalType: string
+        required: false
+        description: "Medication name"
+
+      - name: lab_loinc_code
+        logicalType: string
+        required: false
+        description: "LOINC code for lab tests"
+
+      - name: lab_result_value
+        logicalType: string
+        required: false
+        description: "Lab result value"
+
+      - name: lab_result_unit
+        logicalType: string
+        required: false
+        description: "Lab result unit of measure"
+
+      - name: provider_npi
+        logicalType: string
+        required: true
+        description: "Rendering provider NPI"
+
+      - name: facility_npi
+        logicalType: string
+        required: false
+        description: "Facility NPI (if applicable)"
+
+      - name: is_chronic_condition
+        logicalType: boolean
+        required: true
+        description: "Whether event relates to chronic condition"
+
+      - name: hcc_code
+        logicalType: string
+        required: false
+        description: "Hierarchical Condition Category code"
+
+      - name: hcc_weight
+        logicalType: decimal
+        required: false
+        description: "HCC risk weight"
+
+      - name: source_system
+        logicalType: string
+        required: true
+        description: "Source: claims, ehr, lab, pharmacy"
+
+      - name: created_at
+        logicalType: timestamp
+        required: true
+        description: "Record creation timestamp (UTC)"
+
+      - name: updated_at
+        logicalType: timestamp
+        required: true
+        description: "Record last update timestamp (UTC)"
