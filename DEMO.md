@@ -28,10 +28,89 @@ This demo includes:
 - Admin access to the application
 - PostgreSQL database configured and accessible
 - Unity Catalog with appropriate permissions
-- Databricks cluster (for running demo notebooks)
+- Databricks SQL Warehouse (for running setup scripts)
 - Permissions to create catalogs, schemas, and tables in Unity Catalog
+- Python 3.9+ installed locally (for running setup scripts)
 
-## Demo Setup Steps
+## Quick Setup (Automated)
+
+For a fast setup with synthetic data in Unity Catalog, use the automated setup scripts:
+
+### Step 1: Install Dependencies
+
+```bash
+# From the project root
+cd demo
+pip install -r requirements.txt
+```
+
+### Step 2: Configure Settings
+
+Edit `demo/settings.yaml` and set your Databricks connection details:
+
+```yaml
+databricks:
+  host: "https://your-workspace.cloud.databricks.com"
+  token: "dapi1234567890abcdef..."  # Your personal access token
+  warehouse_id: "abc123def456"      # Your SQL Warehouse ID
+```
+
+You can also use environment variables:
+```bash
+export DATABRICKS_HOST="https://your-workspace.cloud.databricks.com"
+export DATABRICKS_TOKEN="dapi1234567890abcdef..."
+export DATABRICKS_WAREHOUSE_ID="abc123def456"
+```
+
+### Step 3: Run Full Setup
+
+```bash
+# Run all setup steps (creates catalog, schemas, and loads synthetic data)
+python setup_workspace.py --config settings.yaml --all
+
+# Or run in dry-run mode to validate first
+python setup_workspace.py --config settings.yaml --all --dry-run
+```
+
+This will create:
+- Unity Catalog: `healthcare_payor`
+- Schemas: `claims`, `members`, `providers`, `clinical`, `quality`, `analytics`
+- Tables with synthetic data:
+  - **50,000 members** with demographics and enrollment
+  - **100,000 claims** with diagnoses and procedures
+  - **5,000 providers** in the network directory
+  - **500,000 clinical events** (diagnoses, medications, labs)
+  - **50,000 HEDIS quality measures**
+  - **Member 360** aggregated view
+
+### Step 4: Verify Setup
+
+```bash
+python setup_workspace.py --config settings.yaml --verify
+```
+
+### Step 5: Optional - Setup Specific Tables Only
+
+```bash
+# Create just claims and members
+python setup_workspace.py --config settings.yaml --tables claims,members
+
+# Skip catalog creation if it already exists
+python setup_workspace.py --config settings.yaml --all --skip-catalog
+```
+
+### Step 6: Clean Up (Optional)
+
+```bash
+# Remove all demo data and catalog
+python setup_workspace.py --config settings.yaml --clean --yes
+```
+
+**Note**: The setup scripts inject intentional data quality issues (configurable in `settings.yaml`) to demonstrate data quality checks. See the "Data Quality Checks Walkthrough" section below.
+
+---
+
+## Manual Setup Steps (Detailed)
 
 ### Step 1: Configure Data Domains
 
@@ -1084,20 +1163,28 @@ GRANT USE SCHEMA ON SCHEMA healthcare_payor.members TO `account users`;
 -- ... (grant for all schemas)
 ```
 
-#### Step 2: Run Demo Notebooks to Generate Synthetic Data
+#### Step 2: Run Automated Setup Scripts
 
-Navigate to the `demo/` directory and run notebooks in order:
+Use the automated setup scripts described in the **"Quick Setup (Automated)"** section above:
 
-1. **`01_create_claims_tables.py`** - Creates `healthcare_payor.claims.adjudicated_claims` (100K rows)
-2. **`02_create_member_tables.py`** - Creates `healthcare_payor.members.member_profiles` (50K rows)
-3. **`03_create_provider_tables.py`** - Creates provider network data (5K providers)
-4. **`04_create_clinical_tables.py`** - Creates clinical events (500K events)
-5. **`05_create_quality_tables.py`** - Creates HEDIS measures
-6. **`06_create_analytics_tables.py`** - Creates Member 360 aggregate view
+```bash
+cd demo
+pip install -r requirements.txt
+python setup_workspace.py --config settings.yaml --all
+```
+
+This will create all Unity Catalog tables with synthetic data:
+
+1. **`healthcare_payor.claims.adjudicated_claims`** (100K rows)
+2. **`healthcare_payor.members.member_profiles`** (50K rows)
+3. **`healthcare_payor.providers.provider_directory`** (5K providers)
+4. **`healthcare_payor.clinical.member_clinical_events`** (500K events)
+5. **`healthcare_payor.quality.hedis_measures`** (50K measures)
+6. **`healthcare_payor.analytics.member_360_view`** (Member 360 aggregate)
 
 **Execution Time**: ~10-15 minutes total
 
-See **[demo/README.md](demo/README.md)** for detailed instructions.
+See **"Quick Setup (Automated)"** section above for detailed instructions and configuration options.
 
 #### Step 3: Update Data Contracts with Physical Names
 
@@ -1216,6 +1303,412 @@ Ontos (Metadata) → UC Tag Sync Job → Unity Catalog (Governed Tags) → UC Ta
 - Contract tags: `x_ontos_contract_{CONTRACT.NAME}` = `{VERSION}`
 - Domain tags: `x_ontos_domain` = `{DOMAIN.NAME}`
 - Semantic tags: `x_ontos_semantic_{CONCEPT}` = `{IRI}`
+
+## Data Quality Checks Walkthrough
+
+This section demonstrates how to define, configure, and execute data quality checks on your data products using Ontos.
+
+### Overview: Data Quality Framework
+
+Ontos implements the **ODCS (Open Data Contract Standard)** quality framework with support for:
+
+- **Quality Dimensions**: accuracy, completeness, conformity, consistency, coverage, timeliness, uniqueness
+- **Check Types**: library (predefined rules), SQL (custom queries), text, custom (external engines)
+- **Severity Levels**: info, warning, error
+- **Business Impact**: operational, regulatory
+- **Automated Execution**: Scheduled Databricks workflows
+- **Compliance Integration**: Quality scores feed into compliance monitoring
+
+### Step-by-Step: Adding Quality Checks to a Data Contract
+
+#### 1. Define Quality Checks in Your Contract
+
+Navigate to **Data Contracts** and edit the "Healthcare Claims Data Contract". Add quality checks to schema properties:
+
+**Example: Claims Contract with Quality Checks**
+
+```yaml
+schema:
+  - name: claims
+    physicalName: "healthcare_payor.claims.adjudicated_claims"
+    properties:
+      # Required field check
+      - name: claim_id
+        logicalType: string
+        required: true  # ← Generates completeness check
+        unique: true    # ← Generates uniqueness check
+        description: "Unique claim identifier"
+
+      # Numeric range check
+      - name: billed_amount
+        logicalType: decimal
+        required: true
+        minimum: 0      # ← Generates range check (must be >= 0)
+        description: "Total amount billed (must be non-negative)"
+
+      # String length and pattern check
+      - name: provider_npi
+        logicalType: string
+        required: true
+        pattern: "^[0-9]{10}$"  # ← Generates regex pattern check
+        minLength: 10           # ← Generates length check
+        maxLength: 10
+        description: "10-digit National Provider Identifier"
+
+      # Enum/categorical check
+      - name: claim_status
+        logicalType: string
+        required: true
+        enum: ["submitted", "pending", "approved", "denied", "adjusted"]
+        description: "Valid claim statuses only"
+
+      # Date range check
+      - name: service_date_from
+        logicalType: date
+        required: true
+        minimum: "2020-01-01"  # ← Historical data cutoff
+        maximum: "2025-12-31"  # ← Future date limit
+        description: "Service start date"
+```
+
+#### 2. Add Custom Quality Rules
+
+For more advanced checks, add explicit quality rules to your contract:
+
+```yaml
+schema:
+  - name: claims
+    physicalName: "healthcare_payor.claims.adjudicated_claims"
+    quality_checks:
+      # Table-level check (object level)
+      - name: "No Future Service Dates"
+        level: "object"
+        description: "Service dates cannot be in the future"
+        dimension: "accuracy"
+        business_impact: "operational"
+        severity: "error"
+        type: "sql"
+        query: |
+          SELECT COUNT(*) as violations
+          FROM healthcare_payor.claims.adjudicated_claims
+          WHERE service_date_from > CURRENT_DATE()
+        must_be: "0"  # Violation count must be 0
+
+      # Referential integrity check
+      - name: "Valid Member References"
+        level: "object"
+        description: "All member_ids must exist in members table"
+        dimension: "consistency"
+        business_impact: "operational"
+        severity: "error"
+        type: "sql"
+        query: |
+          SELECT COUNT(*) as orphaned_claims
+          FROM healthcare_payor.claims.adjudicated_claims c
+          LEFT JOIN healthcare_payor.members.member_profiles m
+            ON c.member_id = m.member_id
+          WHERE m.member_id IS NULL
+        must_be: "0"
+
+      # Data freshness check
+      - name: "Claims Data Freshness"
+        level: "object"
+        description: "Claims data should be updated within last 24 hours"
+        dimension: "timeliness"
+        business_impact: "operational"
+        severity: "warning"
+        type: "sql"
+        query: |
+          SELECT MAX(updated_at) as last_update
+          FROM healthcare_payor.claims.adjudicated_claims
+        must_be_gt: "CURRENT_TIMESTAMP() - INTERVAL 24 HOURS"
+
+      # Statistical check
+      - name: "Billed Amount Distribution"
+        level: "property"
+        property_name: "billed_amount"
+        description: "Average billed amount should be realistic"
+        dimension: "accuracy"
+        severity: "warning"
+        type: "sql"
+        query: |
+          SELECT AVG(billed_amount) as avg_billed
+          FROM healthcare_payor.claims.adjudicated_claims
+        must_be_ge: "100"   # At least $100 average
+        must_be_le: "5000"  # At most $5000 average
+
+    properties:
+      # ... (schema properties)
+```
+
+#### 3. Configure Quality Checks in the UI
+
+Alternatively, use the Ontos UI to add quality checks:
+
+1. Navigate to **Data Contracts**
+2. Open "Healthcare Claims Data Contract"
+3. Scroll to the schema object (table)
+4. Click **"Add Quality Check"**
+5. Fill in the quality check form:
+   - **Name**: "No Negative Billed Amounts"
+   - **Level**: Property
+   - **Property**: billed_amount
+   - **Dimension**: Accuracy
+   - **Business Impact**: Operational
+   - **Severity**: Error
+   - **Type**: SQL
+   - **Query**:
+     ```sql
+     SELECT COUNT(*) as violations
+     FROM healthcare_payor.claims.adjudicated_claims
+     WHERE billed_amount < 0
+     ```
+   - **Must Be**: 0
+6. Click **"Save"**
+
+#### 4. Enable and Schedule Quality Check Workflow
+
+1. Navigate to **Settings → Jobs**
+2. Find **"Data Quality Checks"** workflow
+3. Click **"Configure"**
+4. Set schedule:
+   ```yaml
+   schedule:
+     quartz_cron_expression: "0 0 2 * * ?"  # Daily at 2 AM UTC
+     pause_status: "UNPAUSED"
+   ```
+5. Configure parameters:
+   - **catalog**: `healthcare_payor`
+   - **schema**: `claims,members,clinical,quality`
+   - **contract_statuses**: `["active", "certified"]`
+   - **verbose**: `false`
+6. Click **"Save & Run Now"** to test
+
+#### 5. Monitor Quality Check Results
+
+After the workflow completes:
+
+1. Navigate to **Data Contracts**
+2. Open "Healthcare Claims Data Contract"
+3. Scroll to **"Quality Check Results"** section
+4. View the latest run:
+   - **Status**: Succeeded / Failed
+   - **Score**: 94.5% (checks_passed / total_checks * 100)
+   - **Checks Passed**: 17 / 18
+   - **Checks Failed**: 1
+   - **Violations**: Summary of failures
+
+5. Click on a failed check to see details:
+   - **Check Name**: "No Future Service Dates"
+   - **Violations Count**: 487
+   - **Message**: "Found 487 claims with future service dates"
+   - **Violation Examples**: (sample of violating records)
+
+### Understanding Injected Quality Issues
+
+The demo setup scripts (`demo/setup_workspace.py`) intentionally inject quality issues to demonstrate the checks. Configuration in `demo/settings.yaml`:
+
+```yaml
+data_generation:
+  quality_issues:
+    enabled: true
+    missing_values: 0.02        # 2% of nullable fields will be null
+    invalid_codes: 0.01         # 1% invalid ICD-10/CPT codes
+    orphaned_references: 0.005  # 0.5% member_id references don't exist
+    duplicate_records: 0.01     # 1% duplicate claim_ids
+    future_dates: 0.005         # 0.5% future service_date_from
+    negative_amounts: 0.01      # 1% negative billed_amount
+    outlier_amounts: 0.03       # 3% extreme amounts (>$100k)
+```
+
+**Expected Quality Issues in Demo Data:**
+
+| Quality Issue | Type | Count (approx) | Check That Catches It |
+|---------------|------|----------------|-----------------------|
+| Missing processed_date | Completeness | 2,000 | Required field check |
+| Invalid ICD-10 codes | Conformity | 1,000 | Pattern/enum check |
+| Orphaned member_ids | Consistency | 500 | Referential integrity check |
+| Duplicate claim_ids | Uniqueness | 1,000 | Unique constraint check |
+| Future service dates | Accuracy | 500 | Date range check |
+| Negative billed amounts | Accuracy | 1,000 | Numeric range check |
+| Outlier amounts (>$100k) | Accuracy | 3,000 | Statistical outlier check |
+
+### Demonstrating the Quality Check Workflow
+
+**Scenario**: Show how quality checks detect and report issues in the claims data.
+
+#### Step 1: Run Initial Quality Check
+
+```bash
+# Trigger quality check workflow via Databricks API or UI
+# Or wait for scheduled run (2 AM UTC daily)
+```
+
+#### Step 2: Review Results in Ontos UI
+
+1. Navigate to **Data Contracts → Healthcare Claims Data Contract**
+2. View quality score: **92.3%** (13 passed / 14 total)
+3. Expand failed checks:
+   - ✓ Required Fields: **PASSED** (98% complete, threshold: 95%)
+   - ✓ Unique Claim IDs: **PASSED** (99% unique, threshold: 99%)
+   - ✗ **No Future Dates**: FAILED (487 violations)
+   - ✓ Valid Member References: **PASSED** (99.5% valid, threshold: 99%)
+   - ✓ Non-Negative Amounts: **PASSED** (99% valid)
+   - ... (more checks)
+
+#### Step 3: Investigate Violations
+
+Click on "No Future Dates" failed check:
+
+```
+Check: No Future Service Dates
+Status: FAILED
+Violations: 487 claims
+Query Result: 487
+Expected: 0
+Severity: error
+Business Impact: operational
+
+Sample Violations:
+- claim_id: CLM-1234567890, service_date_from: 2026-03-15 (82 days in future)
+- claim_id: CLM-9876543210, service_date_from: 2026-01-10 (15 days in future)
+... (showing 10 of 487)
+
+Recommended Action:
+Investigate EDI processing pipeline for timestamp errors. Contact claims-engineering team.
+```
+
+#### Step 4: Fix Quality Issues
+
+**Option A**: Clean the data in Unity Catalog
+
+```sql
+-- Fix future dates (set to current date)
+UPDATE healthcare_payor.claims.adjudicated_claims
+SET service_date_from = CURRENT_DATE()
+WHERE service_date_from > CURRENT_DATE();
+```
+
+**Option B**: Update quality check threshold (if intentional)
+
+Edit the contract to adjust the threshold:
+```yaml
+quality_checks:
+  - name: "No Future Service Dates"
+    must_be_le: "500"  # Allow up to 500 violations temporarily
+```
+
+#### Step 5: Re-run Quality Checks
+
+1. Navigate to **Settings → Jobs → Data Quality Checks**
+2. Click **"Run Now"**
+3. Monitor job execution in Databricks Workflows
+4. Return to Data Contract to see updated score
+
+#### Step 6: View Historical Trends
+
+1. Navigate to **Data Contracts → Healthcare Claims Data Contract**
+2. Click **"Quality History"** tab
+3. View score trends over time:
+   - Jan 5: 92.3% (487 future date violations)
+   - Jan 4: 94.1% (325 future date violations)
+   - Jan 3: 96.2% (180 future date violations)
+4. Identify patterns (e.g., weekend data loads have more issues)
+
+### Integration with Compliance
+
+Quality check scores automatically feed into compliance monitoring:
+
+1. Navigate to **Compliance** (if enabled)
+2. View **"Data Contract Compliance"** dashboard
+3. See aggregate scores:
+   - Claims Contract: 92.3% (below 95% threshold) → **Non-Compliant**
+   - Members Contract: 98.7% → **Compliant**
+   - Providers Contract: 99.1% → **Compliant**
+4. Drill down to see quality check details contributing to compliance score
+
+### Setting Up Notifications for Quality Failures
+
+Configure notifications to alert teams when quality checks fail:
+
+1. Navigate to **Settings → Notifications**
+2. Create notification rule:
+   - **Event**: Data Quality Check Failed
+   - **Condition**: Severity = "error" AND Score < 95%
+   - **Recipients**: claims-engineering team, governance-compliance team
+   - **Channel**: Slack (#claims-data-quality) and Email
+   - **Message Template**:
+     ```
+     ⚠️ Data Quality Alert
+
+     Contract: {contract_name}
+     Score: {quality_score}% (threshold: 95%)
+     Failed Checks: {failed_checks_count}
+
+     Top Violations:
+     {violations_summary}
+
+     View Details: {contract_url}
+     ```
+3. Save and enable
+
+### Quality Check Best Practices
+
+**1. Start with Schema-Based Checks**
+   - Use `required`, `unique`, `minimum`, `maximum`, `pattern` in schema properties
+   - These auto-generate quality checks without custom SQL
+
+**2. Add Custom SQL for Business Logic**
+   - Referential integrity (foreign key constraints)
+   - Cross-table consistency
+   - Statistical bounds (e.g., 99th percentile thresholds)
+
+**3. Use Appropriate Severity Levels**
+   - **Error**: Data is unusable (e.g., null PKs, orphaned FKs)
+   - **Warning**: Data quality degraded but usable (e.g., missing optional fields)
+   - **Info**: Informational metrics (e.g., record counts)
+
+**4. Set Realistic Thresholds**
+   - Don't require 100% perfection for all checks
+   - Allow small error rates (e.g., 99% threshold for some checks)
+   - Adjust thresholds based on upstream data quality
+
+**5. Schedule Checks Appropriately**
+   - Run after data load jobs complete
+   - Daily for production tables
+   - Hourly for real-time streams (if using streaming)
+
+**6. Monitor Trends, Not Just Point Values**
+   - Track quality scores over time
+   - Alert on significant degradations (e.g., >5% drop)
+   - Investigate sudden changes
+
+**7. Integrate with Data Pipelines**
+   - Use quality scores as pipeline gates
+   - Fail data product publishing if quality < threshold
+   - Automatically create JIRA tickets for failures
+
+### Example: End-to-End Quality Workflow
+
+**Scenario**: Claims engineering team publishes a new version of the claims data product.
+
+1. **Developer** updates claims ETL pipeline
+2. **Pipeline** writes data to `healthcare_payor.claims.adjudicated_claims`
+3. **Quality Check Workflow** runs automatically (triggered by table update)
+4. **Ontos** executes all quality checks defined in contract
+5. **Results**:
+   - Score: 91.2% (below 95% threshold)
+   - Failed checks: 3
+6. **Notification** sent to #claims-data-quality Slack channel
+7. **Claims Engineer** investigates failures:
+   - 1,200 claims with future service dates (pipeline bug identified)
+   - 800 orphaned member_ids (upstream member data delayed)
+8. **Engineer** fixes pipeline bug, re-runs ETL
+9. **Quality Check** re-runs, score improves to 97.8%
+10. **Data Product** status updated to "active" (quality gate passed)
+11. **Consumers** notified that new version is available
+
+This workflow ensures data products maintain high quality standards before reaching consumers.
 
 ## Next Steps
 

@@ -1,0 +1,170 @@
+# Healthcare Payor Demo Configuration
+#
+# This file configures the demo data setup for the Ontos Healthcare Payor demo.
+# Replace environment variable placeholders with actual values or set them in your shell.
+
+# ============================================================================
+# Databricks Connection
+# ============================================================================
+databricks:
+  # Workspace URL (e.g., https://adb-1234567890123456.7.azuredatabricks.net)
+  host: "${DATABRICKS_HOST}"
+
+  # Personal Access Token for authentication
+  token: "${DATABRICKS_TOKEN}"
+
+  # SQL Warehouse ID for running SQL commands
+  # Find this in your Databricks workspace under SQL Warehouses
+  warehouse_id: "${DATABRICKS_WAREHOUSE_ID}"
+
+  # Optional: Cluster ID (use 'auto' to create ephemeral cluster)
+  # cluster_id: "${DATABRICKS_CLUSTER_ID:-auto}"
+
+# ============================================================================
+# Unity Catalog Configuration
+# ============================================================================
+catalog:
+  # Name of the catalog to create
+  name: "healthcare_payor"
+
+  # Catalog description
+  comment: "Healthcare Payor Demo - HealthCare Plus Insurance"
+
+  # Schemas to create within the catalog
+  schemas:
+    - name: "claims"
+      comment: "Claims processing and adjudication data"
+
+    - name: "members"
+      comment: "Member enrollment and demographics"
+
+    - name: "providers"
+      comment: "Provider network directory"
+
+    - name: "clinical"
+      comment: "Clinical events and diagnoses"
+
+    - name: "quality"
+      comment: "HEDIS quality measures and Star Ratings"
+
+    - name: "analytics"
+      comment: "Aggregated analytical datasets (Member 360, etc.)"
+
+# ============================================================================
+# Data Generation Settings
+# ============================================================================
+data_generation:
+  # Random seed for reproducibility
+  random_seed: 42
+
+  # Data volumes (number of rows to generate)
+  volumes:
+    members: 1000        # Set to 50000 for full demo
+    claims: 2000         # Set to 100000 for full demo
+    providers: 500       # Set to 5000 for full demo
+    clinical_events: 5000    # Set to 500000 for full demo
+    quality_measures: 1000   # Set to 50000 for full demo
+
+  # Date ranges for generated data
+  date_ranges:
+    enrollment_start: "2020-01-01"
+    enrollment_end: "2024-12-31"
+    claims_start: "2023-01-01"
+    claims_end: "2024-12-31"
+
+  # Data quality issues to inject (for demonstrating quality checks)
+  # Set enabled: false to generate clean data
+  quality_issues:
+    enabled: true
+    missing_values: 0.02        # 2% missing nullable fields
+    invalid_codes: 0.01         # 1% invalid ICD-10/CPT codes
+    orphaned_references: 0.005  # 0.5% orphaned member IDs
+    duplicate_records: 0.01     # 1% duplicate records
+    future_dates: 0.005         # 0.5% future dates
+    negative_amounts: 0.01      # 1% negative financial amounts
+    outlier_amounts: 0.03       # 3% extreme amounts (>$100k)
+
+# ============================================================================
+# Table-Specific Configuration
+# ============================================================================
+tables:
+  claims:
+    table_name: "adjudicated_claims"
+    format: "delta"
+    partition_by: ["service_date_from"]
+    cluster_by: ["member_id", "provider_npi"]
+    enable_cdf: true  # Change Data Feed for incremental processing
+
+  members:
+    table_name: "member_profiles"
+    format: "delta"
+    partition_by: []
+    cluster_by: ["member_id"]
+    enable_cdf: true
+
+  providers:
+    table_name: "provider_directory"
+    format: "delta"
+    partition_by: []
+    cluster_by: ["npi"]
+    enable_cdf: false
+
+  clinical_events:
+    table_name: "member_clinical_events"
+    format: "delta"
+    partition_by: ["event_date"]
+    cluster_by: ["member_id"]
+    enable_cdf: true
+
+  quality_measures:
+    table_name: "hedis_measures"
+    format: "delta"
+    partition_by: ["measurement_year"]
+    cluster_by: ["member_id", "measure_code"]
+    enable_cdf: false
+
+  member_360:
+    table_name: "member_360_view"
+    format: "delta"
+    partition_by: []
+    cluster_by: ["member_id"]
+    enable_cdf: false
+
+# ============================================================================
+# Access Control (Optional)
+# ============================================================================
+access_control:
+  # Set to true to apply grants after creating tables
+  enabled: false
+
+  grants:
+    - principal: "account users"
+      privileges: ["USE CATALOG"]
+      on: "catalog"
+
+    - principal: "data-consumers"
+      privileges: ["SELECT"]
+      on: "all_tables"
+
+    - principal: "data-producers"
+      privileges: ["SELECT", "MODIFY"]
+      on: "all_tables"
+
+# ============================================================================
+# Execution Settings
+# ============================================================================
+execution:
+  # Execution mode: local (Python), cluster (Databricks cluster), or warehouse (SQL Warehouse)
+  mode: "local"
+
+  # Batch size for data generation
+  batch_size: 10000
+
+  # Maximum parallel workers for data generation
+  max_workers: 4
+
+  # Verbose logging
+  verbose: true
+
+  # Dry run mode (validate without creating tables)
+  dry_run: false

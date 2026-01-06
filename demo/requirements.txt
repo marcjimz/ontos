@@ -1,0 +1,18 @@
+# Healthcare Payor Demo Requirements
+# Install with: pip install -r requirements.txt
+
+# Databricks SDK for Unity Catalog and SQL Warehouse operations
+databricks-sdk>=0.20.0
+
+# YAML configuration parsing
+PyYAML>=6.0
+
+# Synthetic data generation
+Faker>=22.0.0
+
+# Data manipulation
+pandas>=2.0.0
+pyarrow>=14.0.0
+
+# For Python 3.11+ compatibility
+numpy>=1.24.0
