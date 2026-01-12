@@ -16,6 +16,8 @@ import DataProducts from './views/data-products';
 import DataProductDetails from './views/data-product-details';
 import DataContracts from './views/data-contracts';
 import DataContractDetails from './views/data-contract-details';
+import Datasets from './views/datasets';
+import DatasetDetails from './views/dataset-details';
 import SemanticModels from './views/semantic-models';
 import Compliance from './views/compliance';
 import CompliancePolicyDetails from './views/compliance-policy-details';
@@ -78,6 +80,8 @@ export default function App() {
               <Route path="/data-products/:productId" element={<DataProductDetails />} />
               <Route path="/data-contracts" element={<DataContracts />} />
               <Route path="/data-contracts/:contractId" element={<DataContractDetails />} />
+              <Route path="/datasets" element={<Datasets />} />
+              <Route path="/datasets/:datasetId" element={<DatasetDetails />} />
               <Route path="/semantic-models" element={<SemanticModels />} />
               <Route path="/master-data" element={<MasterDataManagement />} />
               <Route path="/entitlements" element={<Entitlements />} />
@@ -89,6 +93,7 @@ export default function App() {
               <Route path="/catalog-commander" element={<CatalogCommander />} />
               <Route path="/create-uc" element={<CreateUcObject />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/settings/:tab" element={<Settings />} />
               <Route path="/teams" element={<TeamsView />} />
               <Route path="/projects" element={<ProjectsView />} />
               <Route path="/search" element={<SearchView />} />

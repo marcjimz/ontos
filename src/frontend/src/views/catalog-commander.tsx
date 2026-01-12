@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { TreeView } from '@/components/ui/tree-view';
 import {
   Folder,
@@ -18,7 +19,9 @@ import {
   PanelRightOpen,
   Copy,
   GitCompare,
-  RefreshCw
+  RefreshCw,
+  Sparkles,
+  Send
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,6 +39,11 @@ import useBreadcrumbStore from '@/stores/breadcrumb-store';
 import { CommentTimeline } from '@/components/comments/comment-timeline';
 import { cn } from '@/lib/utils';
 import EntityMetadataPanel from '@/components/metadata/entity-metadata-panel';
+import { Textarea } from '@/components/ui/textarea';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { useToast } from '@/hooks/use-toast';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface CatalogItem {
   id: string;
@@ -78,9 +86,10 @@ interface Estate {
   is_enabled: boolean;
 }
 
-type RightPanelMode = 'hidden' | 'dual-tree' | 'info' | 'comments';
+type RightPanelMode = 'hidden' | 'ask' | 'dual-tree' | 'info' | 'comments';
 
 const CatalogCommander: React.FC = () => {
+  const { t } = useTranslation('catalog-commander');
   const [searchInput, setSearchInput] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedItems, setSelectedItems] = useState<CatalogItem[]>([]);
@@ -98,7 +107,16 @@ const CatalogCommander: React.FC = () => {
   const [estates, setEstates] = useState<Estate[]>([]);
   const [selectedSourceEstate, setSelectedSourceEstate] = useState<string>('');
   const [selectedTargetEstate, setSelectedTargetEstate] = useState<string>('');
-  const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('info');
+  const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('ask');
+  
+  // Ask Ontos chat state
+  const [askInput, setAskInput] = useState('');
+  const [askMessages, setAskMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; timestamp: string }>>([]);
+  const [askLoading, setAskLoading] = useState(false);
+  const [askSessionId, setAskSessionId] = useState<string | undefined>();
+  const askMessagesEndRef = React.useRef<HTMLDivElement>(null);
+  const askInputRef = React.useRef<HTMLTextAreaElement>(null);
+  const { toast } = useToast();
 
   // Draggable divider state - default to 420px, load from localStorage
   const [leftPaneWidth, setLeftPaneWidth] = useState<number>(() => {
@@ -238,7 +256,7 @@ const CatalogCommander: React.FC = () => {
     fetchCatalogs();
     fetchEstates();
     setStaticSegments([]);
-    setDynamicTitle('Catalog Commander');
+    setDynamicTitle(t('title'));
 
     return () => {
         setStaticSegments([]);
@@ -282,6 +300,83 @@ const CatalogCommander: React.FC = () => {
     const forceRefresh = event.shiftKey;
     fetchCatalogs(forceRefresh);
   };
+
+  // Handle Ask Ontos chat with catalog context
+  const handleAskSend = async () => {
+    const messageContent = askInput.trim();
+    if (!messageContent || askLoading) return;
+
+    const selectedNode = getSelectedNodeDetails();
+    
+    // Build context message that includes selected item info
+    let contextualMessage = messageContent;
+    if (selectedNode) {
+      const contextPrefix = `[Context: I'm looking at a ${selectedNode.type} named "${selectedNode.name}" with full path "${selectedNode.id}". Please consider this context when answering.]\n\n`;
+      contextualMessage = contextPrefix + messageContent;
+    }
+
+    // Add user message to display (without context prefix for cleaner UI)
+    setAskMessages(prev => [...prev, {
+      role: 'user',
+      content: messageContent,
+      timestamp: new Date().toISOString()
+    }]);
+    setAskInput('');
+    setAskLoading(true);
+
+    try {
+      const response = await fetch('/api/llm-search/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: contextualMessage, session_id: askSessionId }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'Chat request failed' }));
+        throw new Error(error.detail || 'Chat request failed');
+      }
+
+      const data = await response.json();
+      setAskSessionId(data.session_id);
+      
+      // Add assistant response
+      setAskMessages(prev => [...prev, {
+        role: 'assistant',
+        content: data.message.content || 'No response',
+        timestamp: data.message.timestamp || new Date().toISOString()
+      }]);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to send message';
+      toast({
+        title: t('errors.error'),
+        description: errorMessage,
+        variant: 'destructive',
+      });
+      // Remove the user message on error
+      setAskMessages(prev => prev.slice(0, -1));
+    } finally {
+      setAskLoading(false);
+      askInputRef.current?.focus();
+    }
+  };
+
+  const handleAskKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleAskSend();
+    }
+  };
+
+  const handleNewAskSession = () => {
+    setAskSessionId(undefined);
+    setAskMessages([]);
+    askInputRef.current?.focus();
+  };
+
+  // Scroll to bottom when ask messages change
+  useEffect(() => {
+    askMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [askMessages]);
 
   const handleItemSelect = (item: CatalogItem) => {
     setSelectedItems([item]);
@@ -338,15 +433,25 @@ const CatalogCommander: React.FC = () => {
     }
   };
 
-  const renderTree = (items: CatalogItem[], isSource: boolean): TreeViewItem[] => {
-    return items.map(item => {
+  // Apply filter only at the top level; once navigating deeper, show all children unfiltered
+  const renderTree = (items: CatalogItem[], isSource: boolean, bypassFilter: boolean = false): TreeViewItem[] => {
+    const filteredItems = items.filter((item) => {
+      if (bypassFilter) return true;
+      const q = searchInput.trim().toLowerCase();
+      if (!q) return true;
+      if (expandedNodes.has(item.id)) return true; // Keep expanded nodes visible
+      return item.name.toLowerCase().includes(q);
+    });
+
+    return filteredItems.map(item => {
       const hasChildren = item.hasChildren || (item.children && item.children.length > 0);
       
       const treeItem = {
         id: item.id,
         name: item.name,
         icon: getIcon(item.type),
-        children: item.children ? renderTree(item.children, isSource) : [],
+        // When a query is active, bypass filter for children (show unfiltered)
+        children: item.children ? renderTree(item.children, isSource, Boolean(searchInput.trim())) : [],
         onClick: () => {
           handleItemSelect(item);
         },
@@ -362,27 +467,10 @@ const CatalogCommander: React.FC = () => {
     });
   };
 
-  if (isLoading) {
-    return (
-      <div className="container py-6 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center h-screen">
-        <div className="text-red-500 mb-4">{error}</div>
-        <Button onClick={fetchCatalogs}>Retry</Button>
-      </div>
-    );
-  }
-
   return (
     <div className="py-6">
       <h1 className="text-3xl font-bold mb-6 flex items-center gap-2">
-        <FolderKanban className="w-8 h-8" /> Catalog Commander
+        <FolderKanban className="w-8 h-8" /> {t('title')}
       </h1>
 
       {/* Action Toolbar */}
@@ -396,7 +484,7 @@ const CatalogCommander: React.FC = () => {
             className="h-9"
           >
             <Eye className="h-4 w-4 mr-2" />
-            View Data
+            {t('actions.viewData')}
           </Button>
           {canPerformWriteActions && (
             <>
@@ -407,7 +495,7 @@ const CatalogCommander: React.FC = () => {
                 className="h-9"
               >
                 <ArrowRight className="h-4 w-4 mr-2" />
-                Move
+                {t('actions.move')}
               </Button>
               <Button
                 onClick={() => handleOperation('delete')}
@@ -416,7 +504,7 @@ const CatalogCommander: React.FC = () => {
                 className="h-9 text-destructive hover:text-destructive hover:bg-destructive/10"
               >
                 <Trash2 className="h-4 w-4 mr-2" />
-                Delete
+                {t('actions.delete')}
               </Button>
               <Button
                 onClick={() => handleOperation('rename')}
@@ -425,7 +513,7 @@ const CatalogCommander: React.FC = () => {
                 className="h-9"
               >
                 <Pencil className="h-4 w-4 mr-2" />
-                Rename
+                {t('actions.rename')}
               </Button>
             </>
           )}
@@ -434,6 +522,18 @@ const CatalogCommander: React.FC = () => {
         {/* Right Panel Mode Toggle */}
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1 border rounded-lg p-1 bg-muted/30">
+            <Button
+              variant={rightPanelMode === 'ask' ? 'secondary' : 'ghost'}
+              size="sm"
+              onClick={() => setRightPanelMode(rightPanelMode === 'ask' ? 'hidden' : 'ask')}
+              className={cn(
+                "h-8 px-3",
+                rightPanelMode === 'ask' && "shadow-sm"
+              )}
+            >
+              <Sparkles className="h-4 w-4 mr-1.5" />
+              {t('askOntos')}
+            </Button>
             <Button
               variant={rightPanelMode === 'info' ? 'secondary' : 'ghost'}
               size="sm"
@@ -444,7 +544,7 @@ const CatalogCommander: React.FC = () => {
               )}
             >
               <Info className="h-4 w-4 mr-1.5" />
-              Info
+              {t('actions.info')}
             </Button>
             {canPerformWriteActions && (
               <Button
@@ -457,7 +557,7 @@ const CatalogCommander: React.FC = () => {
                 )}
               >
                 <GitCompare className="h-4 w-4 mr-1.5" />
-                Operations
+                {t('actions.operations')}
               </Button>
             )}
             <Button
@@ -470,7 +570,7 @@ const CatalogCommander: React.FC = () => {
               )}
             >
               <MessageSquare className="h-4 w-4 mr-1.5" />
-              Comments
+              {t('actions.comments')}
             </Button>
           </div>
           {rightPanelMode !== 'hidden' && (
@@ -494,18 +594,18 @@ const CatalogCommander: React.FC = () => {
           style={{ width: `${leftPaneWidth}px` }}
         >
           <CardHeader className="flex-none pb-3 border-b">
-            <CardTitle className="text-lg font-semibold">Catalog Browser</CardTitle>
+            <CardTitle className="text-lg font-semibold">{t('catalogBrowser')}</CardTitle>
           </CardHeader>
           <CardContent className="flex-1 flex flex-col h-full min-h-0 p-4 space-y-3">
             {estates.length > 1 && (
               <div className="space-y-2 flex-none">
-                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Metastore</Label>
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{t('labels.metastore')}</Label>
                 <Select
                   value={selectedSourceEstate}
                   onValueChange={setSelectedSourceEstate}
                 >
                   <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Select Estate" />
+                    <SelectValue placeholder={t('labels.selectEstate')} />
                   </SelectTrigger>
                   <SelectContent>
                     {estates.map(estate => (
@@ -522,7 +622,7 @@ const CatalogCommander: React.FC = () => {
             )}
             <div className="flex gap-2 flex-none">
               <Input
-                placeholder="Filter catalogs..."
+                placeholder={t('labels.filterCatalogs')}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="h-9 flex-1"
@@ -533,19 +633,32 @@ const CatalogCommander: React.FC = () => {
                 className="h-9 w-9 flex-shrink-0"
                 onClick={handleRefresh}
                 disabled={isLoading}
-                title="Refresh (hold Shift for force refresh)"
+                title={t('tooltips.refresh')}
               >
                 <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
               </Button>
             </div>
             <div className="flex-1 min-h-0 overflow-auto border rounded-md bg-muted/20">
-              <div className="min-w-max text-sm [&_button]:!py-0.5 [&_button]:!my-0 [&_ul]:!space-y-0 [&_ul]:!gap-0 [&_li]:!my-0 [&_li]:!py-0">
-                <TreeView
-                  data={renderTree(sourceItems, true)}
-                  className="p-1 !space-y-0 !gap-0"
-                  onSelectChange={(item) => handleItemSelect(item as unknown as CatalogItem)}
-                />
-              </div>
+              {isLoading ? (
+                <div className="flex items-center justify-center h-full min-h-[200px]">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : error ? (
+                <div className="flex flex-col items-center justify-center h-full min-h-[200px] p-4">
+                  <div className="text-destructive text-sm mb-3">{error}</div>
+                  <Button size="sm" variant="outline" onClick={() => fetchCatalogs()}>
+                    {t('actions.retry')}
+                  </Button>
+                </div>
+              ) : (
+                <div className="min-w-max text-sm [&_button]:!py-0.5 [&_button]:!my-0 [&_ul]:!space-y-0 [&_ul]:!gap-0 [&_li]:!my-0 [&_li]:!py-0">
+                  <TreeView
+                    data={renderTree(sourceItems, true)}
+                    className="p-1 !space-y-0 !gap-0"
+                    onSelectChange={(item) => handleItemSelect(item as unknown as CatalogItem)}
+                  />
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -558,7 +671,7 @@ const CatalogCommander: React.FC = () => {
               isDragging && "bg-primary"
             )}
             onMouseDown={handleMouseDown}
-            title="Drag to resize"
+            title={t('tooltips.dragToResize')}
           />
         )}
 
@@ -574,7 +687,7 @@ const CatalogCommander: React.FC = () => {
                     variant="outline"
                     size="icon"
                     className="h-10 w-10 hover:bg-primary hover:text-primary-foreground transition-colors"
-                    title="Copy to target"
+                    title={t('tooltips.copyToTarget')}
                   >
                     <Copy className="h-4 w-4" />
                   </Button>
@@ -583,7 +696,7 @@ const CatalogCommander: React.FC = () => {
                     variant="outline"
                     size="icon"
                     className="h-10 w-10 hover:bg-primary hover:text-primary-foreground transition-colors"
-                    title="Move to target"
+                    title={t('tooltips.moveToTarget')}
                   >
                     <ArrowRight className="h-4 w-4" />
                   </Button>
@@ -592,7 +705,7 @@ const CatalogCommander: React.FC = () => {
                     variant="outline"
                     size="icon"
                     className="h-10 w-10 hover:bg-primary hover:text-primary-foreground transition-colors"
-                    title="Move from target"
+                    title={t('tooltips.moveFromTarget')}
                   >
                     <ArrowLeft className="h-4 w-4" />
                   </Button>
@@ -600,12 +713,12 @@ const CatalogCommander: React.FC = () => {
 
                 <Card className="flex-1 flex flex-col h-full min-w-0 shadow-sm border-border/50">
                   <CardHeader className="flex-none pb-3 border-b">
-                    <CardTitle className="text-lg font-semibold">Target</CardTitle>
+                    <CardTitle className="text-lg font-semibold">{t('target')}</CardTitle>
                   </CardHeader>
                   <CardContent className="flex-1 flex flex-col h-full min-h-0 p-4 space-y-3">
                     {estates.length > 1 && (
                       <div className="space-y-2 flex-none">
-                        <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Metastore</Label>
+                        <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{t('labels.metastore')}</Label>
                         <Select
                           value={selectedTargetEstate}
                           onValueChange={setSelectedTargetEstate}
@@ -628,7 +741,7 @@ const CatalogCommander: React.FC = () => {
                     )}
                     <div className="flex gap-2 flex-none">
                       <Input
-                        placeholder="Filter catalogs..."
+                        placeholder={t('labels.filterCatalogs')}
                         value={searchInput}
                         onChange={(e) => setSearchInput(e.target.value)}
                         className="h-9 flex-1"
@@ -639,30 +752,190 @@ const CatalogCommander: React.FC = () => {
                         className="h-9 w-9 flex-shrink-0"
                         onClick={handleRefresh}
                         disabled={isLoading}
-                        title="Refresh (hold Shift for force refresh)"
+                        title={t('tooltips.refresh')}
                       >
                         <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
                       </Button>
                     </div>
                     <div className="flex-1 min-h-0 overflow-auto border rounded-md bg-muted/20">
-                      <div className="min-w-max text-sm [&_button]:!py-0.5 [&_button]:!my-0 [&_ul]:!space-y-0 [&_ul]:!gap-0 [&_li]:!my-0 [&_li]:!py-0">
-                        <TreeView
-                          data={renderTree(targetItems, false)}
-                          className="p-1 !space-y-0 !gap-0"
-                          onSelectChange={(item) => handleItemSelect(item as unknown as CatalogItem)}
-                        />
-                      </div>
+                      {isLoading ? (
+                        <div className="flex items-center justify-center h-full min-h-[200px]">
+                          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                        </div>
+                      ) : error ? (
+                        <div className="flex flex-col items-center justify-center h-full min-h-[200px] p-4">
+                          <div className="text-destructive text-sm mb-3">{error}</div>
+                          <Button size="sm" variant="outline" onClick={() => fetchCatalogs()}>
+                            Retry
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="min-w-max text-sm [&_button]:!py-0.5 [&_button]:!my-0 [&_ul]:!space-y-0 [&_ul]:!gap-0 [&_li]:!my-0 [&_li]:!py-0">
+                          <TreeView
+                            data={renderTree(targetItems, false)}
+                            className="p-1 !space-y-0 !gap-0"
+                            onSelectChange={(item) => handleItemSelect(item as unknown as CatalogItem)}
+                          />
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
               </>
             )}
 
+            {/* Ask Ontos Panel */}
+            {rightPanelMode === 'ask' && (
+              <Card className="flex-1 flex flex-col h-full min-w-0 shadow-sm border-border/50">
+                <CardHeader className="flex-none pb-3 border-b">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2 text-lg font-semibold">
+                      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
+                        <Sparkles className="w-3 h-3 text-white" />
+                      </div>
+                      {t('askPanel.title')}
+                    </CardTitle>
+                    {askMessages.length > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleNewAskSession}
+                        className="h-7 text-xs"
+                      >
+                        {t('actions.newChat')}
+                      </Button>
+                    )}
+                  </div>
+                  {getSelectedNodeDetails() && (
+                    <div className="text-xs text-muted-foreground mt-1 flex items-center gap-2">
+                      <span>{t('askPanel.askingAbout')} <span className="font-medium">{getSelectedNodeDetails()?.name}</span></span>
+                      <Badge variant="outline" className="text-xs">
+                        {getSelectedNodeDetails()?.type}
+                      </Badge>
+                    </div>
+                  )}
+                </CardHeader>
+                <CardContent className="flex-1 overflow-hidden p-0 flex flex-col">
+                  {/* Messages Area */}
+                  <ScrollArea className="flex-1 p-4">
+                    {askMessages.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-full text-center space-y-4 py-8">
+                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-violet-500/20 to-purple-600/20 flex items-center justify-center">
+                          <Sparkles className="w-6 h-6 text-violet-500" />
+                        </div>
+                        <div className="space-y-2">
+                          <h3 className="text-sm font-medium">{t('askPanel.askAboutItem')}</h3>
+                          <p className="text-xs text-muted-foreground max-w-[200px]">
+                            {getSelectedNodeDetails() 
+                              ? t('askPanel.askQuestionsAbout', { name: getSelectedNodeDetails()?.name })
+                              : t('askPanel.selectItemFirst')}
+                          </p>
+                        </div>
+                        {getSelectedNodeDetails() && (
+                          <div className="flex flex-wrap gap-1.5 justify-center">
+                            {[t('askPanel.exampleQuestions.columns'), t('askPanel.exampleQuestions.owner'), t('askPanel.exampleQuestions.usage')].map((q, i) => (
+                              <Button
+                                key={i}
+                                variant="outline"
+                                size="sm"
+                                className="text-xs h-7"
+                                onClick={() => setAskInput(q)}
+                              >
+                                {q}
+                              </Button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {askMessages.map((msg, idx) => (
+                          <div key={idx} className={`flex gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                            <div className={`
+                              flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center
+                              ${msg.role === 'user' 
+                                ? 'bg-sky-500 dark:bg-sky-600 text-white' 
+                                : 'bg-gradient-to-br from-violet-500 to-purple-600 text-white'
+                              }
+                            `}>
+                              {msg.role === 'user' 
+                                ? <span className="text-[10px] font-medium">U</span>
+                                : <Sparkles className="w-3 h-3" />
+                              }
+                            </div>
+                            <div className={`
+                              flex-1 max-w-[85%] rounded-lg px-3 py-2 text-sm
+                              ${msg.role === 'user' 
+                                ? 'bg-sky-100 dark:bg-sky-900/50 text-sky-900 dark:text-sky-100' 
+                                : 'bg-muted'
+                              }
+                            `}>
+                              {msg.role === 'user' ? (
+                                <p className="whitespace-pre-wrap">{msg.content}</p>
+                              ) : (
+                                <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                    {msg.content}
+                                  </ReactMarkdown>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                        {askLoading && (
+                          <div className="flex gap-2">
+                            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
+                              <Sparkles className="w-3 h-3 text-white" />
+                            </div>
+                            <div className="bg-muted rounded-lg px-3 py-2 flex items-center gap-2">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <span className="text-xs text-muted-foreground">{t('askPanel.thinking')}</span>
+                            </div>
+                          </div>
+                        )}
+                        <div ref={askMessagesEndRef} />
+                      </div>
+                    )}
+                  </ScrollArea>
+                  
+                  {/* Input Area */}
+                  <div className="p-3 border-t">
+                    <div className="flex gap-2">
+                      <Textarea
+                        ref={askInputRef}
+                        value={askInput}
+                        onChange={(e) => setAskInput(e.target.value)}
+                        onKeyDown={handleAskKeyDown}
+                        placeholder={getSelectedNodeDetails() 
+                          ? t('askPanel.askAboutPlaceholder', { name: getSelectedNodeDetails()?.name })
+                          : t('askPanel.selectItemPlaceholder')
+                        }
+                        className="min-h-[36px] max-h-24 resize-none text-sm"
+                        disabled={askLoading || !getSelectedNodeDetails()}
+                      />
+                      <Button
+                        onClick={handleAskSend}
+                        disabled={!askInput.trim() || askLoading || !getSelectedNodeDetails()}
+                        size="icon"
+                        className="h-9 w-9 shrink-0"
+                      >
+                        {askLoading ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Send className="w-4 h-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Info Panel */}
             {rightPanelMode === 'info' && (
               <Card className="flex-1 flex flex-col h-full min-w-0 shadow-sm border-border/50">
                 <CardHeader className="flex-none pb-3 border-b">
-                  <CardTitle className="text-lg font-semibold">Object Information</CardTitle>
+                  <CardTitle className="text-lg font-semibold">{t('objectInformation')}</CardTitle>
                 </CardHeader>
                 <CardContent className="flex-1 overflow-auto p-4">
                   {selectedObjectInfo ? (
@@ -672,7 +945,7 @@ const CatalogCommander: React.FC = () => {
                         <CardHeader className="pb-3">
                           <CardTitle className="text-sm font-medium flex items-center gap-2">
                             <Info className="h-4 w-4" />
-                            Basic Information
+                            {t('basicInformation')}
                           </CardTitle>
                         </CardHeader>
                         <CardContent>
@@ -681,26 +954,26 @@ const CatalogCommander: React.FC = () => {
                             return node ? (
                               <div className="space-y-3">
                                 <div className="grid grid-cols-3 gap-2 items-center">
-                                  <span className="text-sm text-muted-foreground">Name:</span>
+                                  <span className="text-sm text-muted-foreground">{t('labels.name')}</span>
                                   <span className="text-sm font-medium col-span-2">{node.name}</span>
                                 </div>
                                 <Separator />
                                 <div className="grid grid-cols-3 gap-2 items-center">
-                                  <span className="text-sm text-muted-foreground">Type:</span>
+                                  <span className="text-sm text-muted-foreground">{t('labels.type')}</span>
                                   <div className="col-span-2">
                                     <Badge variant="outline" className="font-mono">{node.type}</Badge>
                                   </div>
                                 </div>
                                 <Separator />
                                 <div className="grid grid-cols-3 gap-2">
-                                  <span className="text-sm text-muted-foreground">Full Path:</span>
+                                  <span className="text-sm text-muted-foreground">{t('labels.fullPath')}</span>
                                   <code className="text-xs bg-muted p-2 rounded border break-all col-span-2 font-mono">{node.id}</code>
                                 </div>
                                 {node.type === 'table' && (
                                   <>
                                     <Separator />
                                     <div className="flex items-center justify-between">
-                                      <span className="text-sm text-muted-foreground">Actions:</span>
+                                      <span className="text-sm text-muted-foreground">{t('labels.actions')}</span>
                                       <Button
                                         size="sm"
                                         variant="outline"
@@ -708,14 +981,14 @@ const CatalogCommander: React.FC = () => {
                                         className="h-8"
                                       >
                                         <Eye className="h-3 w-3 mr-1" />
-                                        View Data
+                                        {t('actions.viewData')}
                                       </Button>
                                     </div>
                                   </>
                                 )}
                               </div>
                             ) : (
-                              <p className="text-sm text-muted-foreground">Loading details...</p>
+                              <p className="text-sm text-muted-foreground">{t('messages.loadingDetails')}</p>
                             );
                           })()}
                         </CardContent>
@@ -733,7 +1006,7 @@ const CatalogCommander: React.FC = () => {
                     <div className="flex items-center justify-center h-full">
                       <div className="text-center">
                         <Info className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                        <p className="text-sm text-muted-foreground">Select an object to view its information</p>
+                        <p className="text-sm text-muted-foreground">{t('messages.selectObjectToViewInfo')}</p>
                       </div>
                     </div>
                   )}
@@ -747,7 +1020,7 @@ const CatalogCommander: React.FC = () => {
                 <CardHeader className="flex-none pb-3 border-b">
                   <CardTitle className="flex items-center gap-2 text-lg font-semibold">
                     <MessageSquare className="h-5 w-5" />
-                    Comments & Activity
+                    {t('commentsAndActivity')}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="flex-1 overflow-hidden p-4">
@@ -763,7 +1036,7 @@ const CatalogCommander: React.FC = () => {
                     <div className="flex items-center justify-center h-full">
                       <div className="text-center">
                         <MessageSquare className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                        <p className="text-sm text-muted-foreground">Select an object to view comments</p>
+                        <p className="text-sm text-muted-foreground">{t('messages.selectObjectToViewComments')}</p>
                       </div>
                     </div>
                   )}
@@ -777,7 +1050,7 @@ const CatalogCommander: React.FC = () => {
       <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
         <DialogContent className="max-w-[90vw] max-h-[90vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle>Dataset View: {selectedDataset}</DialogTitle>
+            <DialogTitle>{t('messages.datasetView', { name: selectedDataset })}</DialogTitle>
           </DialogHeader>
           {loadingData ? (
             <div className="flex items-center justify-center h-32">
@@ -794,7 +1067,7 @@ const CatalogCommander: React.FC = () => {
               />
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">No data available</p>
+            <p className="text-sm text-muted-foreground">{t('messages.noDataAvailable')}</p>
           )}
         </DialogContent>
       </Dialog>
@@ -802,16 +1075,16 @@ const CatalogCommander: React.FC = () => {
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Confirm Operation</DialogTitle>
+            <DialogTitle>{t('messages.confirmOperation')}</DialogTitle>
           </DialogHeader>
           <div className="py-4">
             {selectedItems.length > 0
-              ? `Selected items: ${selectedItems.map(item => item.name).join(', ')}`
-              : 'No items selected'}
+              ? t('messages.selectedItems', { items: selectedItems.map(item => item.name).join(', ') })
+              : t('messages.noItemsSelected')}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
-            <Button onClick={() => setIsDialogOpen(false)}>Confirm</Button>
+            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>{t('actions.cancel')}</Button>
+            <Button onClick={() => setIsDialogOpen(false)}>{t('actions.confirm')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

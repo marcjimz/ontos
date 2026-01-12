@@ -335,18 +335,18 @@ def get_db_url(settings: Settings) -> str:
     """Construct the PostgreSQL SQLAlchemy URL with appropriate auth method."""
     
     # Validate required settings
-    if not all([settings.POSTGRES_HOST, settings.POSTGRES_DB]):
-        raise ValueError("PostgreSQL connection details (Host, DB) are missing in settings.")
+    if not all([settings.PGHOST, settings.PGDATABASE]):
+        raise ValueError("PostgreSQL connection details (PGHOST, PGDATABASE) are missing in settings.")
     
     # Determine authentication mode based on ENV
     use_password_auth = settings.ENV.upper().startswith("LOCAL")
     
     if use_password_auth:
         logger.info("Database: Using password authentication (LOCAL mode)")
-        if not settings.POSTGRES_PASSWORD or not settings.POSTGRES_USER:
-            raise ValueError("POSTGRES_PASSWORD and POSTGRES_USER required for LOCAL mode")
-        username = settings.POSTGRES_USER
-        password = settings.POSTGRES_PASSWORD
+        if not settings.PGPASSWORD or not settings.PGUSER:
+            raise ValueError("PGPASSWORD and PGUSER required for LOCAL mode")
+        username = settings.PGUSER
+        password = settings.PGPASSWORD
     else:
         logger.info("Database: Using OAuth authentication (Lakebase mode)")
         # Dynamically determine username from authenticated principal
@@ -366,13 +366,13 @@ def get_db_url(settings: Settings) -> str:
     options_list = []
     
     # Add schema to search_path if specified
-    if settings.POSTGRES_DB_SCHEMA:
+    if settings.PGSCHEMA:
         # Validate schema name for connection options to prevent injection
         try:
-            validated_schema = sanitize_postgres_identifier(settings.POSTGRES_DB_SCHEMA)
+            validated_schema = sanitize_postgres_identifier(settings.PGSCHEMA)
         except ValueError as e:
             raise ValueError(
-                f"Invalid PostgreSQL schema identifier in POSTGRES_DB_SCHEMA: {e}. "
+                f"Invalid PostgreSQL schema identifier in PGSCHEMA: {e}. "
                 "Please check configuration."
             ) from e
         options_list.append(f"-csearch_path={validated_schema}")
@@ -392,9 +392,9 @@ def get_db_url(settings: Settings) -> str:
         drivername="postgresql+psycopg2",
         username=username,
         password=password,
-        host=settings.POSTGRES_HOST,
-        port=settings.POSTGRES_PORT,
-        database=settings.POSTGRES_DB,
+        host=settings.PGHOST,
+        port=settings.PGPORT,
+        database=settings.PGDATABASE,
         query=query_params if query_params else None
     )
     url_str = db_url_obj.render_as_string(hide_password=False)
@@ -425,7 +425,7 @@ def ensure_database_and_schema_exist(settings: Settings):
     
     # Determine username based on mode
     if is_local_mode:
-        username = settings.POSTGRES_USER
+        username = settings.PGUSER
     else:
         # Get service principal username for OAuth mode
         ws_client = get_workspace_client(settings)
@@ -439,13 +439,13 @@ def ensure_database_and_schema_exist(settings: Settings):
     
     # Validate all PostgreSQL identifiers to prevent SQL injection
     try:
-        target_db = sanitize_postgres_identifier(settings.POSTGRES_DB)
-        target_schema = sanitize_postgres_identifier(settings.POSTGRES_DB_SCHEMA) if settings.POSTGRES_DB_SCHEMA else None
+        target_db = sanitize_postgres_identifier(settings.PGDATABASE)
+        target_schema = sanitize_postgres_identifier(settings.PGSCHEMA) if settings.PGSCHEMA else None
         username = sanitize_postgres_identifier(username)
     except ValueError as e:
         raise ValueError(
             f"Invalid PostgreSQL identifier in configuration: {e}. "
-            "Please check POSTGRES_DB, POSTGRES_DB_SCHEMA, and username."
+            "Please check PGDATABASE, PGSCHEMA, and username."
         ) from e
     
     logger.info(f"Username: {username}")
@@ -455,22 +455,22 @@ def ensure_database_and_schema_exist(settings: Settings):
     if not is_local_mode:
         refresh_oauth_token(settings)
     
-    # Build URL for default postgres database (for DB creation in OAuth mode)
-    # or target database (for LOCAL mode - DB should already exist)
-    db_for_connection = target_db if is_local_mode else "postgres"
+    # Build connection URL
+    # In OAuth mode, connect directly to the target database (must be pre-created)
+    # In LOCAL mode, connect to the target database (should already exist)
     connection_url = URL.create(
         drivername="postgresql+psycopg2",
         username=username,
-        password=settings.POSTGRES_PASSWORD if is_local_mode else "",
-        host=settings.POSTGRES_HOST,
-        port=settings.POSTGRES_PORT,
-        database=db_for_connection,
+        password=settings.PGPASSWORD if is_local_mode else "",
+        host=settings.PGHOST,
+        port=settings.PGPORT,
+        database=target_db,
     )
     
-    # Create temporary engine
+    # Create temporary engine for schema setup
     temp_engine = create_engine(
         connection_url.render_as_string(hide_password=False),
-        isolation_level="AUTOCOMMIT"  # Needed for CREATE DATABASE/SCHEMA
+        isolation_level="AUTOCOMMIT"  # Needed for CREATE SCHEMA
     )
     
     # Inject OAuth token for connections in OAuth mode
@@ -482,58 +482,28 @@ def ensure_database_and_schema_exist(settings: Settings):
                 cparams["password"] = _oauth_token
     
     try:
-        # In OAuth mode, check/create database first
+        # In OAuth mode, verify we can connect to the target database
+        # The database must be pre-created by an admin with: 
+        #   CREATE DATABASE "app_ontos"; GRANT CREATE ON DATABASE "app_ontos" TO PUBLIC;
         if not is_local_mode:
-            with temp_engine.connect() as conn:
-                # Check if target database exists (using parameterized query)
-                result = conn.execute(
-                    text("SELECT 1 FROM pg_database WHERE datname = :dbname"),
-                    {"dbname": target_db}
-                )
-                db_exists = result.scalar() is not None
-                
-                if not db_exists:
-                    logger.info(f"Database does not exist, attempting to create: {target_db}")
-                    try:
-                        # CREATE DATABASE cannot be parameterized, but identifier is validated
-                        conn.execute(text(f'CREATE DATABASE "{target_db}"'))
-                        logger.info(f"✓ Database created: {target_db} (owner: {username})")
-                    except Exception as e:
-                        if "permission denied" in str(e).lower():
-                            logger.warning(f"Cannot create database (insufficient privileges). "
-                                         f"Database '{target_db}' must be created manually.")
-                            logger.warning(f"Run this as a Lakebase admin: CREATE DATABASE \"{target_db}\";")
-                            raise RuntimeError(
-                                f"Database '{target_db}' does not exist and service principal lacks CREATEDB privilege. "
-                                f"Please create the database manually first."
-                            ) from e
-                        else:
-                            raise
-                else:
-                    logger.info(f"✓ Database already exists: {target_db}")
-            
-            # Dispose temp engine and create new one for target database
-            temp_engine.dispose()
-            
-            target_db_url = URL.create(
-                drivername="postgresql+psycopg2",
-                username=username,
-                password="",
-                host=settings.POSTGRES_HOST,
-                port=settings.POSTGRES_PORT,
-                database=target_db,
-            )
-            
-            temp_engine = create_engine(
-                target_db_url.render_as_string(hide_password=False),
-                isolation_level="AUTOCOMMIT"
-            )
-            
-            @event.listens_for(temp_engine, "do_connect")
-            def inject_token_target(dialect, conn_rec, cargs, cparams):
-                global _oauth_token
-                if _oauth_token:
-                    cparams["password"] = _oauth_token
+            try:
+                with temp_engine.connect() as conn:
+                    conn.execute(text("SELECT 1"))
+                    logger.info(f"✓ Connected to database: {target_db}")
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "does not exist" in error_msg or "database" in error_msg:
+                    raise RuntimeError(
+                        f"Database '{target_db}' does not exist.\n\n"
+                        f"SETUP REQUIRED: Before deploying the app, create the database:\n"
+                        f"  1. Connect to your Lakebase instance as an admin\n"
+                        f"  2. Run these SQL commands:\n"
+                        f'     CREATE DATABASE "{target_db}";\n'
+                        f'     GRANT CREATE ON DATABASE "{target_db}" TO PUBLIC;\n'
+                        f"  3. Restart the app\n\n"
+                        f"See the README for detailed setup instructions."
+                    ) from e
+                raise
         
         # Now handle schema (works for both LOCAL and OAuth modes)
         with temp_engine.connect() as conn:
@@ -731,14 +701,14 @@ def init_db() -> None:
 
         # Explicitly enforce search_path at connection time to ensure correct schema usage in environments
         # where connection options may be ignored.
-        if settings.POSTGRES_DB_SCHEMA:
+        if settings.PGSCHEMA:
             # Validate schema name to prevent SQL injection in SET command
             try:
-                target_schema = sanitize_postgres_identifier(settings.POSTGRES_DB_SCHEMA)
+                target_schema = sanitize_postgres_identifier(settings.PGSCHEMA)
             except ValueError as e:
-                logger.error(f"Invalid PostgreSQL schema name in POSTGRES_DB_SCHEMA: {e}")
+                logger.error(f"Invalid PostgreSQL schema name in PGSCHEMA: {e}")
                 raise ValueError(
-                    f"Invalid PostgreSQL schema identifier in POSTGRES_DB_SCHEMA: {e}. "
+                    f"Invalid PostgreSQL schema identifier in PGSCHEMA: {e}. "
                     "Please check configuration."
                 ) from e
 
@@ -773,7 +743,11 @@ def init_db() -> None:
         logger.info("Getting current database revision...")
         with engine.connect() as connection:
             db_revision = get_current_db_revision(connection, alembic_cfg)
-        # Connection is now closed, safe to proceed with upgrades
+        # CRITICAL: Dispose the engine pool immediately after getting revision.
+        # This releases the connection used by MigrationContext and clears any
+        # implicit transaction state that could interfere with subsequent Alembic operations.
+        logger.info("Disposing engine pool after revision check...")
+        _engine.dispose()
         logger.info(f"Current Database Revision: {db_revision}")
 
         # Handle migrations based on database state
@@ -785,13 +759,96 @@ def init_db() -> None:
             logger.info(f"Database revision '{db_revision}' differs from head revision '{head_revision}'.")
             logger.info("Attempting Alembic upgrade to head...")
             try:
-                target_schema = settings.POSTGRES_DB_SCHEMA or 'public'
-                # Pass engine to Alembic - let it fully manage connection and transaction lifecycle
-                # This avoids all transaction state conflicts that caused hangs with Lakebase
-                alembic_cfg.attributes['engine'] = _engine
-                alembic_cfg.attributes['target_schema'] = target_schema
-                alembic_command.upgrade(alembic_cfg, "head")
+                # CRITICAL: Dispose the main engine's connection pool before running Alembic.
+                # This releases all pooled connections that might hold implicit transaction state.
+                logger.info("Disposing engine pool to release connections before Alembic migration...")
+                _engine.dispose()
+                
+                # Run Alembic upgrade via subprocess to avoid hanging issues with
+                # Alembic's internal runpy-based execution when called programmatically.
+                # This ensures proper process isolation and cleanup.
+                import subprocess
+                import sys
+                import shutil
+
+                # For Lakebase (OAuth mode), we need to pass the token to the subprocess
+                # via environment variable since the subprocess can't access our in-memory token
+                subprocess_env = os.environ.copy()
+                is_lakebase_mode = not settings.ENV.upper().startswith("LOCAL")
+                if is_lakebase_mode:
+                    # Refresh token to ensure it's valid for the subprocess
+                    logger.info("Refreshing OAuth token for Alembic subprocess...")
+                    token = refresh_oauth_token(settings)
+                    subprocess_env["ALEMBIC_DB_PASSWORD"] = token
+                    logger.info("OAuth token passed to subprocess via environment variable")
+
+                # Find Python executable reliably for containerized environments
+                python_executable = None
+
+                # Try sys.executable first if it exists and is absolute
+                if sys.executable and os.path.isabs(sys.executable) and os.path.exists(sys.executable):
+                    python_executable = sys.executable
+                    logger.info(f"Using sys.executable: {python_executable}")
+                else:
+                    # sys.executable is unreliable (relative path or doesn't exist)
+                    # Try to find venv Python relative to the current working directory or script location
+                    potential_venv_paths = [
+                        os.path.join(os.getcwd(), ".venv", "bin", "python3"),
+                        os.path.join(os.getcwd(), ".venv", "bin", "python"),
+                        os.path.join(os.getcwd(), "venv", "bin", "python3"),
+                        os.path.join(os.getcwd(), "venv", "bin", "python"),
+                        # Try relative to the backend src directory
+                        os.path.join(os.path.dirname(__file__), "..", "..", ".venv", "bin", "python3"),
+                        os.path.join(os.path.dirname(__file__), "..", "..", ".venv", "bin", "python"),
+                        # Try system Python as fallback
+                        "/usr/local/bin/python3",
+                        "/usr/bin/python3",
+                    ]
+
+                    for path in potential_venv_paths:
+                        abs_path = os.path.abspath(path)
+                        if os.path.exists(abs_path):
+                            python_executable = abs_path
+                            logger.info(f"Found Python executable at: {python_executable}")
+                            break
+
+                    # Last resort: try to find alembic executable directly
+                    if not python_executable:
+                        alembic_path = shutil.which("alembic")
+                        if alembic_path:
+                            logger.warning("Could not find Python executable, will try running alembic command directly")
+                            python_executable = None  # Will use alembic directly below
+                        else:
+                            raise RuntimeError(
+                                f"Could not find Python executable for Alembic subprocess. "
+                                f"sys.executable={sys.executable}, cwd={os.getcwd()}, "
+                                f"tried paths: {potential_venv_paths}"
+                            )
+
+                # Run alembic upgrade
+                if python_executable:
+                    cmd = [python_executable, "-m", "alembic", "upgrade", "head"]
+                else:
+                    # Use alembic command directly
+                    cmd = ["alembic", "upgrade", "head"]
+
+                logger.info(f"Running Alembic upgrade command: {' '.join(cmd)}")
+                result = subprocess.run(
+                    cmd,
+                    cwd=os.path.dirname(alembic_script_location),  # Run from backend dir
+                    capture_output=True,
+                    text=True,
+                    timeout=300,  # 5 minute timeout
+                    env=subprocess_env
+                )
+                if result.returncode != 0:
+                    logger.error(f"Alembic upgrade stderr: {result.stderr}")
+                    raise RuntimeError(f"Alembic upgrade failed with exit code {result.returncode}: {result.stderr}")
+                logger.info(f"Alembic upgrade output: {result.stdout}")
                 logger.info("✓ Alembic upgrade to head COMPLETED.")
+            except subprocess.TimeoutExpired:
+                logger.critical("Alembic upgrade timed out after 5 minutes!")
+                raise RuntimeError("Alembic upgrade timed out")
             except Exception as alembic_err:
                 logger.critical("Alembic upgrade failed! Manual intervention may be required.", exc_info=True)
                 raise RuntimeError("Failed to upgrade database schema.") from alembic_err
@@ -802,8 +859,8 @@ def init_db() -> None:
         logger.info("Verifying/creating tables based on SQLAlchemy models...")
         # Schema for create_all if PostgreSQL
         schema_to_create_in = None
-        if settings.POSTGRES_DB_SCHEMA:
-            schema_to_create_in = settings.POSTGRES_DB_SCHEMA
+        if settings.PGSCHEMA:
+            schema_to_create_in = settings.PGSCHEMA
             # We need to ensure this schema exists before calling create_all if it's not 'public'
             # and if tables don't explicitly define their schema.
             # SQLAlchemy create_all does not create schemas.
@@ -824,7 +881,7 @@ def init_db() -> None:
         # Once Alembic is tracking the schema, migrations handle all schema changes
         if db_revision is None:
             logger.info("Fresh database detected (no Alembic version). Using create_all() for initial setup...")
-            target_schema = settings.POSTGRES_DB_SCHEMA or 'public'
+            target_schema = settings.PGSCHEMA or 'public'
             
             # Create all tables in the target schema
             with _engine.begin() as connection:
@@ -834,14 +891,23 @@ def init_db() -> None:
             logger.info("✓ Database tables created by create_all.")
             
             # Stamp the database with the baseline migration
+            # Using direct INSERT instead of alembic_command.stamp() to avoid 
+            # hanging issues with Alembic's runpy-based execution in some environments
             logger.info("Stamping database with baseline migration...")
             try:
-                # Pass engine to Alembic - let it fully manage connection and transaction lifecycle
-                # This avoids all transaction state conflicts that caused hangs with Lakebase
-                alembic_cfg.attributes['engine'] = _engine
-                alembic_cfg.attributes['target_schema'] = target_schema
-                alembic_command.stamp(alembic_cfg, "head")
-                logger.info("✓ Database stamped with baseline migration.")
+                with _engine.begin() as connection:
+                    connection.execute(text(f'SET search_path TO "{target_schema}"'))
+                    # Create alembic_version table if needed and insert head revision
+                    connection.execute(text("""
+                        CREATE TABLE IF NOT EXISTS alembic_version (
+                            version_num VARCHAR(32) NOT NULL,
+                            CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+                        )
+                    """))
+                    connection.execute(text("DELETE FROM alembic_version"))
+                    connection.execute(text("INSERT INTO alembic_version (version_num) VALUES (:rev)"), 
+                                      {"rev": head_revision})
+                logger.info(f"✓ Database stamped with baseline migration: {head_revision}")
             except Exception as stamp_err:
                 logger.error(f"Failed to stamp database: {stamp_err}", exc_info=True)
                 raise

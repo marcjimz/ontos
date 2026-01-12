@@ -312,6 +312,37 @@ class TagsManager(SearchableAsset):
             return True
         return False
 
+    # --- Entity-Tag Relationship Methods ---
+    def get_entities_for_tag(
+        self, 
+        db: Session, 
+        *, 
+        tag_id: UUID, 
+        entity_type: Optional[str] = None
+    ) -> List[dict]:
+        """Get all entities that have a specific tag assigned.
+        
+        Returns a list of dicts containing entity_id, entity_type, assigned_value, 
+        assigned_by, and assigned_at.
+        """
+        from src.db_models.tags import EntityTagAssociationDb
+        
+        query = db.query(EntityTagAssociationDb).filter(EntityTagAssociationDb.tag_id == tag_id)
+        if entity_type:
+            query = query.filter(EntityTagAssociationDb.entity_type == entity_type)
+        
+        associations = query.all()
+        return [
+            {
+                "entity_id": assoc.entity_id,
+                "entity_type": assoc.entity_type,
+                "assigned_value": assoc.assigned_value,
+                "assigned_by": assoc.assigned_by,
+                "assigned_at": assoc.assigned_at.isoformat() if assoc.assigned_at else None
+            }
+            for assoc in associations
+        ]
+
     # --- SearchableAsset Implementation ---
     def get_search_index_items(self) -> List[SearchIndexItem]:
         logger.info("TagsManager: Fetching tags for search indexing...")
@@ -334,6 +365,15 @@ class TagsManager(SearchableAsset):
                         continue
 
                     tag_api_model = Tag.from_orm(tag_db_obj)  # Use Pydantic model for FQN
+                    
+                    # Build extra_data for configurable search fields
+                    extra_data = {
+                        "category": tag_api_model.namespace_name or DEFAULT_NAMESPACE_NAME,
+                        "status": tag_api_model.status.value if tag_api_model.status else "",
+                    }
+
+                    # Link to search view with tag filter to show all entities with this tag
+                    search_query = f"tag:{tag_api_model.fully_qualified_name}"
                     items.append(
                         SearchIndexItem(
                             id=f"tag::{tag_api_model.id}",
@@ -342,12 +382,13 @@ class TagsManager(SearchableAsset):
                             title=tag_api_model.fully_qualified_name,
                             description=tag_api_model.description
                             or f"Tag: {tag_api_model.name} in namespace {tag_api_model.namespace_name}",
-                            link=f"/settings/tags?tagId={tag_api_model.id}",
+                            link=f"/search?tab=app&app_query={search_query}",
                             tags=[
                                 tag_api_model.name,
                                 tag_api_model.namespace_name or DEFAULT_NAMESPACE_NAME,
                                 f"status:{tag_api_model.status.value}",
                             ],
+                            extra_data=extra_data,
                         )
                     )
 

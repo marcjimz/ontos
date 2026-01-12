@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import TagChip from '@/components/ui/tag-chip';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Plus, Pencil, Trash2, AlertCircle, Upload, ChevronDown, Loader2, KeyRound, HelpCircle } from 'lucide-react';
+import { Plus, Pencil, Trash2, AlertCircle, Upload, ChevronDown, Loader2, KeyRound, HelpCircle, FileText } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import DataContractBasicFormDialog from '@/components/data-contracts/data-contract-basic-form-dialog'
 import { useDropzone } from 'react-dropzone';
@@ -364,11 +364,21 @@ export default function DataContracts() {
           </Button>
         );
       },
-      cell: ({ row }) => (
-        <Badge variant="outline" className={getStatusColor(row.getValue("status"))}>
-          {row.getValue("status")}
-        </Badge>
-      ),
+      cell: ({ row }) => {
+        const contract = row.original;
+        return (
+          <div className="flex items-center gap-1">
+            {contract.draftOwnerId && (
+              <Badge variant="outline" className="text-xs bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200">
+                Personal
+              </Badge>
+            )}
+            <Badge variant="outline" className={getStatusColor(row.getValue("status"))}>
+              {row.getValue("status")}
+            </Badge>
+          </div>
+        );
+      },
     },
     {
       accessorKey: "tags",
@@ -450,6 +460,7 @@ export default function DataContracts() {
   return (
     <div className="py-6">
       <h1 className="text-3xl font-bold mb-6 flex items-center gap-2">
+        <FileText className="w-8 h-8" />
         Data Contracts
       </h1>
 

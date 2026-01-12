@@ -30,12 +30,14 @@ from src.routes import (
     data_contracts_routes,
     data_domains_routes,
     data_product_routes,
+    datasets_routes,
     entitlements_routes,
     entitlements_sync_routes,
     estate_manager_routes,
     jobs_routes,
     llm_search_routes,
-    master_data_management_routes,
+    mcp_routes,
+    mcp_tokens_routes,
     mdm_routes,
     metadata_routes,
     notifications_routes,
@@ -68,7 +70,6 @@ from src.controller.authorization_manager import AuthorizationManager
 from src.utils.startup_tasks import (
     initialize_database,
     initialize_managers,
-    load_initial_data,
     startup_event_handler,
     shutdown_event_handler
 )
@@ -104,12 +105,10 @@ async def startup_event():
     initialize_database(settings=settings)
     initialize_managers(app)
     
-    # Load Initial/Demo Data - Pass the app instance
-    # The function now gets settings/managers from app.state
-    logger.info("Attempting to load initial data...")
-    load_initial_data(app=app)
+    # Demo data is loaded on-demand via POST /api/settings/demo-data/load
+    # See: src/backend/src/data/demo_data.sql
     
-    # After initial data load, ensure SearchManager is initialized and index built
+    # Ensure SearchManager is initialized and index built
     try:
         from src.common.search_interfaces import SearchableAsset
         from src.controller.search_manager import SearchManager
@@ -144,11 +143,14 @@ logger.info(f"STATIC_ASSETS_PATH: {STATIC_ASSETS_PATH}")
 # mimetypes.add_type('image/svg+xml', '.svg')
 # mimetypes.add_type('image/png', '.png')
 
+# Import version from package
+from src import __version__
+
 # Create single FastAPI app with settings dependency
 app = FastAPI(
     title="Ontos",
     description="A Databricks App for managing data products, contracts, and more",
-    version="1.0.0",
+    version=__version__,
     dependencies=[Depends(get_settings)],
     on_startup=[startup_event],
     on_shutdown=[shutdown_event]
@@ -185,9 +187,9 @@ if not os.environ.get('TESTING'):
 # Data Management features
 data_product_routes.register_routes(app)
 data_contracts_routes.register_routes(app)
+datasets_routes.register_routes(app)
 semantic_models_routes.register_routes(app)
-master_data_management_routes.register_routes(app)
-mdm_routes.register_routes(app)  # New MDM integration with contracts/reviews
+mdm_routes.register_routes(app)  # MDM integration with contracts/reviews
 compliance_routes.register_routes(app)
 estate_manager_routes.register_routes(app)
 # Security features
@@ -203,6 +205,8 @@ comments_routes.register_routes(app)
 notifications_routes.register_routes(app)
 search_routes.register_routes(app)
 llm_search_routes.register_routes(app)
+mcp_routes.register_routes(app)
+mcp_tokens_routes.register_routes(app)
 jobs_routes.register_routes(app)
 settings_routes.register_routes(app)
 access_requests_routes.register_routes(app)
@@ -219,9 +223,6 @@ costs_routes.register_routes(app)
 from src.routes import approvals_routes
 approvals_routes.register_routes(app)
 
-from src.routes import debug_routes
-debug_routes.register_routes(app)
-
 # Define other specific API routes BEFORE the catch-all
 @app.get("/api/time")
 async def get_current_time():
@@ -236,7 +237,6 @@ async def get_cache_version():
 @app.get("/api/version")
 async def get_app_version():
     """Get the application version and server start time"""
-    from src import __version__
     return {
         'version': __version__,
         'startTime': SERVER_STARTUP_TIME,

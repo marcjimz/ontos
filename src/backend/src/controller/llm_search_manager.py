@@ -8,6 +8,7 @@ business questions about data products, glossary terms, costs, and analytics.
 
 import json
 import os
+import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
@@ -62,6 +63,26 @@ You have access to the following tools:
 12. **list_semantic_links** - List semantic links (business term associations) for a data product or contract.
 
 13. **remove_semantic_link** - Remove a semantic link. Use list_semantic_links first to find the link ID.
+
+14. **search_tags** - Search for existing tags by name, namespace, or description.
+
+15. **create_tag** - Create a new tag. Tags use the format `namespace/tag_name` (e.g., `import/healthcare` creates tag 'healthcare' in namespace 'import'). If no slash is present, the tag goes into the 'default' namespace. Namespaces are auto-created if they don't exist.
+
+16. **assign_tag_to_entity** - Assign an existing tag to a data product, data contract, domain, team, or project. Use search_tags first to find the tag ID.
+
+17. **list_entity_tags** - List all tags assigned to a specific entity.
+
+18. **remove_tag_from_entity** - Remove a tag assignment from an entity.
+
+## Tag Naming Convention
+
+Tags are organized using namespaces with a slash (`/`) separator:
+- `namespace/tag_name` format (e.g., `import/healthcare`, `compliance/gdpr`, `pii/sensitive`)
+- If no slash is present (e.g., just `pii`), the tag uses the 'default' namespace
+- Examples:
+  - `import/healthcare` → namespace='import', tag='healthcare'
+  - `compliance/gdpr` → namespace='compliance', tag='gdpr'
+  - `customer-data` → namespace='default', tag='customer-data'
 
 ## Guidelines
 
@@ -423,16 +444,59 @@ class LLMSearchManager:
             
         except Exception as e:
             logger.error(f"Error processing chat: {e}", exc_info=True)
-            error_msg = self._session_store.add_message(
-                self._db, session.id, MessageRole.ASSISTANT,
-                content=f"I apologize, but I encountered an error processing your request: {str(e)}"
-            )
-            return ChatResponse(
-                session_id=session.id,
-                message=error_msg,
-                tool_calls_executed=0,
-                sources=[]
-            )
+            
+            # Create a user-friendly error message
+            error_type = type(e).__name__
+            if "ValidationError" in str(e):
+                user_message = (
+                    "I encountered a validation error while processing a request. "
+                    "This typically happens when data doesn't match expected formats. "
+                    f"Details: {str(e)[:200]}"
+                )
+            elif "timeout" in str(e).lower() or "timed out" in str(e).lower():
+                user_message = (
+                    "The request timed out. This might happen with complex queries. "
+                    "Please try a simpler question or try again later."
+                )
+            elif "connection" in str(e).lower() or "network" in str(e).lower():
+                user_message = (
+                    "I had trouble connecting to a required service. "
+                    "Please try again in a moment."
+                )
+            else:
+                user_message = (
+                    f"I encountered an error while processing your request ({error_type}). "
+                    "Please try rephrasing your question or try again."
+                )
+            
+            # Try to persist the error message to the session
+            try:
+                error_msg = self._session_store.add_message(
+                    self._db, session.id, MessageRole.ASSISTANT,
+                    content=user_message
+                )
+                return ChatResponse(
+                    session_id=session.id,
+                    message=error_msg,
+                    tool_calls_executed=0,
+                    sources=[]
+                )
+            except Exception as persist_error:
+                # If we can't persist the error message (e.g., session was lost),
+                # return a synthetic response without persisting
+                logger.error(f"Failed to persist error message to session: {persist_error}", exc_info=True)
+                synthetic_msg = ChatMessage(
+                    id=str(uuid.uuid4()),
+                    role=MessageRole.ASSISTANT,
+                    content=user_message,
+                    timestamp=datetime.utcnow()
+                )
+                return ChatResponse(
+                    session_id=session.id,
+                    message=synthetic_msg,
+                    tool_calls_executed=0,
+                    sources=[]
+                )
     
     # ========================================================================
     # LLM Processing

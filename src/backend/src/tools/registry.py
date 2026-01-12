@@ -189,8 +189,13 @@ def create_default_registry() -> ToolRegistry:
         SearchGlossaryTermsTool,
         AddSemanticLinkTool,
         ListSemanticLinksTool,
-        RemoveSemanticLinkTool
+        RemoveSemanticLinkTool,
+        FindEntitiesByConceptTool,
+        ExecuteSparqlQueryTool,
+        GetConceptHierarchyTool,
+        GetConceptNeighborsTool
     )
+    from src.tools.search import GlobalSearchTool
     from src.tools.analytics import (
         GetTableSchemaTool,
         ExecuteAnalyticsQueryTool,
@@ -217,6 +222,16 @@ def create_default_registry() -> ToolRegistry:
         CreateProjectTool,
         UpdateProjectTool,
         DeleteProjectTool
+    )
+    from src.tools.tags import (
+        SearchTagsTool,
+        GetTagTool,
+        CreateTagTool,
+        UpdateTagTool,
+        DeleteTagTool,
+        ListEntityTagsTool,
+        AssignTagToEntityTool,
+        RemoveTagFromEntityTool
     )
     
     registry = ToolRegistry()
@@ -261,6 +276,13 @@ def create_default_registry() -> ToolRegistry:
     registry.register(AddSemanticLinkTool())
     registry.register(ListSemanticLinksTool())
     registry.register(RemoveSemanticLinkTool())
+    registry.register(FindEntitiesByConceptTool())
+    registry.register(ExecuteSparqlQueryTool())
+    registry.register(GetConceptHierarchyTool())
+    registry.register(GetConceptNeighborsTool())
+    
+    # Search tools
+    registry.register(GlobalSearchTool())
     
     # Analytics tools
     registry.register(GetTableSchemaTool())
@@ -269,6 +291,16 @@ def create_default_registry() -> ToolRegistry:
     
     # Costs tools
     registry.register(GetDataProductCostsTool())
+    
+    # Tags tools (CRUD + entity assignment)
+    registry.register(SearchTagsTool())
+    registry.register(GetTagTool())
+    registry.register(CreateTagTool())
+    registry.register(UpdateTagTool())
+    registry.register(DeleteTagTool())
+    registry.register(ListEntityTagsTool())
+    registry.register(AssignTagToEntityTool())
+    registry.register(RemoveTagFromEntityTool())
     
     logger.info(f"Created default registry with {len(registry)} tools")
     return registry

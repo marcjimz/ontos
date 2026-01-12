@@ -1,5 +1,4 @@
 import {
-    Database,
     FileTextIcon,
     Network,
     Users, // Using Users icon from About for MDM for now
@@ -17,6 +16,8 @@ import {
     UserCheck, // Added icon for Teams
     FolderOpen, // Added icon for Projects
     ScrollText, // Added icon for Audit Trail
+    Table2, // Icon for Datasets (matching marketplace)
+    Package, // Icon for Data Products (matching marketplace)
     type LucideIcon, // Import LucideIcon type
   } from 'lucide-react';
   
@@ -67,6 +68,16 @@ import {
       showInLanding: false,
     },
     {
+      id: 'datasets',
+      name: 'Datasets',
+      path: '/datasets',
+      description: 'Physical implementations of data contracts (tables, views).',
+      icon: Table2,
+      group: 'Data Products',
+      maturity: 'ga',
+      showInLanding: true,
+    },
+    {
       id: 'data-contracts',
       name: 'Contracts',
       path: '/data-contracts',
@@ -81,7 +92,7 @@ import {
       name: 'Products',
       path: '/data-products',
       description: 'Group and manage related Databricks assets with tags.',
-      icon: Database,
+      icon: Package,
       group: 'Data Products',
       maturity: 'ga',
       showInLanding: true,
@@ -150,7 +161,7 @@ import {
     },
     // Security
     {
-      id: 'security',
+      id: 'security-features',
       name: 'Security Features',
       path: '/security',
       description: 'Enable advanced security like differential privacy.',

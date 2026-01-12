@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ColumnDef } from '@tanstack/react-table';
-import { MoreHorizontal, Plus, Trash2, Edit, Settings, Tag, Hash, Users, Loader2, AlertCircle } from 'lucide-react';
+import { MoreHorizontal, Plus, Trash2, Edit, Settings, Tag, Hash, Users, Loader2, AlertCircle, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DataTable } from '@/components/ui/data-table';
@@ -45,6 +45,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useApi } from '@/hooks/use-api';
 import { useToast } from '@/hooks/use-toast';
 import { RelativeDate } from '@/components/common/relative-date';
+import { useAppSettingsStore } from '@/stores/app-settings-store';
 
 // Types based on backend models
 interface TagNamespace {
@@ -105,12 +106,18 @@ interface PermissionFormData {
 export default function TagsSettings() {
   const { get, post, put, delete: deleteApi, loading } = useApi();
   const { toast } = useToast();
+  const { setTagDisplayFormat: setGlobalTagDisplayFormat } = useAppSettingsStore();
 
   // State
   const [namespaces, setNamespaces] = useState<TagNamespace[]>([]);
   const [selectedNamespace, setSelectedNamespace] = useState<string>('');
   const [tags, setTags] = useState<Tag[]>([]);
   const [permissions, setPermissions] = useState<TagNamespacePermission[]>([]);
+  
+  // Tag display format setting
+  const [tagDisplayFormat, setTagDisplayFormat] = useState<'short' | 'long'>('short');
+  const [isLoadingDisplayFormat, setIsLoadingDisplayFormat] = useState(false);
+  const [isSavingDisplayFormat, setIsSavingDisplayFormat] = useState(false);
 
   // Dialog states
   const [isNamespaceDialogOpen, setIsNamespaceDialogOpen] = useState(false);
@@ -179,9 +186,41 @@ export default function TagsSettings() {
     }
   }, [get, toast, selectedNamespace]);
 
+  // Fetch tag display format setting
+  const fetchDisplayFormat = useCallback(async () => {
+    setIsLoadingDisplayFormat(true);
+    try {
+      const response = await get<{ tag_display_format?: string }>('/api/settings');
+      if (response.data?.tag_display_format) {
+        setTagDisplayFormat(response.data.tag_display_format as 'short' | 'long');
+      }
+    } catch (err: any) {
+      console.error('Error fetching display format:', err);
+    } finally {
+      setIsLoadingDisplayFormat(false);
+    }
+  }, [get]);
+
+  // Save tag display format setting
+  const saveDisplayFormat = async (format: 'short' | 'long') => {
+    setIsSavingDisplayFormat(true);
+    try {
+      await put('/api/settings', { tag_display_format: format });
+      setTagDisplayFormat(format);
+      // Also update the global store so all TagChips update immediately
+      setGlobalTagDisplayFormat(format);
+      toast({ title: 'Tag display format updated' });
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Error saving display format', description: err.message });
+    } finally {
+      setIsSavingDisplayFormat(false);
+    }
+  };
+
   useEffect(() => {
     fetchNamespaces();
-  }, [fetchNamespaces]);
+    fetchDisplayFormat();
+  }, [fetchNamespaces, fetchDisplayFormat]);
 
   useEffect(() => {
     if (selectedNamespace) {
@@ -441,6 +480,48 @@ export default function TagsSettings() {
 
   return (
     <div className="space-y-6">
+      {/* Tag Display Settings */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Eye className="h-5 w-5" />
+                Tag Display Settings
+              </CardTitle>
+              <CardDescription>
+                Configure how tags are displayed throughout the application.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-4">
+            <Label htmlFor="display-format-select">Display Format:</Label>
+            <Select 
+              value={tagDisplayFormat} 
+              onValueChange={(value: 'short' | 'long') => saveDisplayFormat(value)}
+              disabled={isLoadingDisplayFormat || isSavingDisplayFormat}
+            >
+              <SelectTrigger id="display-format-select" className="w-[240px]">
+                <SelectValue placeholder="Select format" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="short" className="whitespace-nowrap">Short (tag name only)</SelectItem>
+                <SelectItem value="long" className="whitespace-nowrap">Long (namespace/tag name)</SelectItem>
+              </SelectContent>
+            </Select>
+            {(isLoadingDisplayFormat || isSavingDisplayFormat) && (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            )}
+          </div>
+          <p className="text-sm text-muted-foreground mt-2">
+            <strong>Short:</strong> Shows only the tag name (e.g., "pii"). <br />
+            <strong>Long:</strong> Shows namespace and tag name (e.g., "compliance/pii").
+          </p>
+        </CardContent>
+      </Card>
+
       {/* Namespaces Management */}
       <Card>
         <CardHeader>

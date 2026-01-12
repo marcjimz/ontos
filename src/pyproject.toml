@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "ontos"
 version = "0.1.0"
-description = "Unified Catalog Application"
+description = "A Business Catalog for the Databricks Platform"
 readme = "../README.md"
 authors = [
-    { name="larsgeorge", email="lars.george@gmail.com" }
+    { name="Databricks", email="ontos-support@databricks.com" }
 ]
-license = "Apache-2.0"
+license = "Databricks License"
 requires-python = ">=3.10,<3.13"
 dynamic = ["dependencies"]
 
@@ -24,6 +24,8 @@ packages = ["src/backend"]
 python = "3.10"
 
 [tool.hatch.envs.dev]
+type = "virtual"
+builder = true
 dependencies = [
     "pytest>=7.0",
     "pytest-cov>=4.0",

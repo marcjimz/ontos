@@ -25,6 +25,7 @@ class SearchDomainsTool(BaseTool):
         }
     }
     required_params = ["query"]
+    required_scope = "domains:read"
     
     async def execute(
         self,
@@ -92,6 +93,7 @@ class GetDomainTool(BaseTool):
         }
     }
     required_params = ["domain_id"]
+    required_scope = "domains:read"
     
     async def execute(
         self,
@@ -160,6 +162,7 @@ class CreateDomainTool(BaseTool):
         }
     }
     required_params = ["name"]
+    required_scope = "domains:write"
     
     async def execute(
         self,
@@ -207,7 +210,6 @@ class CreateDomainTool(BaseTool):
             
         except Exception as e:
             logger.error(f"[create_domain] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            ctx.db.rollback()
             return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
 
 
@@ -235,6 +237,7 @@ class UpdateDomainTool(BaseTool):
         }
     }
     required_params = ["domain_id"]
+    required_scope = "domains:write"
     
     async def execute(
         self,
@@ -299,7 +302,6 @@ class UpdateDomainTool(BaseTool):
             
         except Exception as e:
             logger.error(f"[update_domain] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            ctx.db.rollback()
             return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
 
 
@@ -315,6 +317,7 @@ class DeleteDomainTool(BaseTool):
         }
     }
     required_params = ["domain_id"]
+    required_scope = "domains:write"
     
     async def execute(
         self,
@@ -356,5 +359,4 @@ class DeleteDomainTool(BaseTool):
             
         except Exception as e:
             logger.error(f"[delete_domain] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            ctx.db.rollback()
             return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")

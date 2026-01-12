@@ -26,6 +26,7 @@ class GetDataProductTool(BaseTool):
         }
     }
     required_params = ["product_id"]
+    required_scope = "data-products:read"
     
     async def execute(
         self,
@@ -101,6 +102,7 @@ class DeleteDataProductTool(BaseTool):
         }
     }
     required_params = ["product_id"]
+    required_scope = "data-products:write"
     
     async def execute(
         self,
@@ -137,7 +139,6 @@ class DeleteDataProductTool(BaseTool):
             
         except Exception as e:
             logger.error(f"[delete_data_product] FAILED: {type(e).__name__}: {e}", exc_info=True)
-            ctx.db.rollback()
             return ToolResult(success=False, error=f"{type(e).__name__}: {str(e)}")
 
 
@@ -162,6 +163,7 @@ class SearchDataProductsTool(BaseTool):
         }
     }
     required_params = ["query"]
+    required_scope = "data-products:read"
     
     async def execute(
         self,
@@ -301,6 +303,7 @@ class CreateDraftDataProductTool(BaseTool):
         }
     }
     required_params = ["name", "description", "domain"]
+    required_scope = "data-products:write"
     
     async def execute(
         self,
@@ -400,6 +403,7 @@ class UpdateDataProductTool(BaseTool):
         }
     }
     required_params = ["product_id"]
+    required_scope = "data-products:write"
     
     async def execute(
         self,
@@ -549,6 +553,7 @@ class ListDataProductsTool(BaseTool):
         }
     }
     required_params = []
+    required_scope = "data-products:read"
     
     async def execute(
         self,

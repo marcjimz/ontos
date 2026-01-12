@@ -6,19 +6,20 @@ import { Card, CardContent, CardTitle, CardHeader, CardDescription } from '@/com
 import { Loader2, Database, TrendingUp, FileText as FileTextIcon, Network, Scale, Globe, AlertCircle } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { UnityCatalogLogo } from '@/components/unity-catalog-logo';
-// import { Button } from '@/components/ui/button';
 import { FeatureMaturity } from '@/config/features';
 import { useFeatureVisibilityStore } from '@/stores/feature-visibility-store';
-// import { cn } from '@/lib/utils';
 import { usePermissions } from '@/stores/permissions-store';
 import { FeatureAccessLevel, HomeSection } from '@/types/settings';
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import DiscoverySection from '@/components/home/discovery-section';
 import DataCurationSection from '@/components/home/data-curation-section';
 import RequiredActionsSection from '@/components/home/required-actions-section';
+import RequestRoleSection from '@/components/home/request-role-section';
 import QuickActions from '@/components/home/quick-actions';
 import RecentActivity from '@/components/home/recent-activity';
+import MarketplaceView from '@/components/home/marketplace-view';
 import { useUserStore } from '@/stores/user-store';
+import { useViewModeStore, ViewMode } from '@/stores/view-mode-store';
 
 interface Stats {
   dataContracts: { count: number; loading: boolean; error: string | null };
@@ -50,6 +51,7 @@ interface ComplianceData {
 
 export default function Home() {
   const { t, i18n } = useTranslation(['home', 'common']);
+  const { viewMode } = useViewModeStore();
   const [stats, setStats] = useState<Stats>({
     dataContracts: { count: 0, loading: true, error: null },
     dataProducts: { count: 0, loading: true, error: null },
@@ -67,7 +69,7 @@ export default function Home() {
   const [complianceLoading, setComplianceLoading] = useState(true);
   const [complianceError, setComplianceError] = useState<string | null>(null);
   const allowedMaturities = useFeatureVisibilityStore((state) => state.allowedMaturities);
-  const { permissions, isLoading: permissionsLoading, hasPermission } = usePermissions();
+  const { permissions, isLoading: permissionsLoading, hasPermission, requestableRoles, appliedRoleId } = usePermissions();
 
   useEffect(() => {
     fetch('/api/data-products')
@@ -298,7 +300,7 @@ export default function Home() {
           allowedMaturities.includes(tile.maturity as FeatureMaturity) &&
           hasPermission(tile.id, FeatureAccessLevel.READ_ONLY)
       );
-  }, [baseSummaryTiles, allowedMaturities, permissionsLoading, hasPermission]);
+  }, [baseSummaryTiles, allowedMaturities, permissionsLoading, hasPermission, appliedRoleId]);
 
   // const summaryTiles = baseSummaryTiles.filter(tile => allowedMaturities.includes(tile.maturity as FeatureMaturity));
   const isComplianceVisible = filteredSummaryTiles.some(tile => tile.id === 'compliance');
@@ -310,7 +312,7 @@ export default function Home() {
   }, [permissions, permissionsLoading]);
 
   // Determine configured home sections from applied role (if any)
-  const { availableRoles, appliedRoleId } = usePermissions();
+  const { availableRoles } = usePermissions();
   const { userInfo } = useUserStore();
   const userGroups = (userInfo as any)?.groups || [];
 
@@ -344,75 +346,101 @@ export default function Home() {
 
   // Note: sections themselves handle fine-grained permission visibility internally
 
+  // Determine if user has management capabilities (can create/edit, not just view)
+  // Users with only READ_ONLY on data-products are considered "consumer only"
+  const hasManagementAccess = useMemo(() => {
+    if (permissionsLoading || !permissions) return false;
+    // Check for any write/admin permission on key features
+    const managementFeatures = ['data-products', 'data-contracts', 'data-domains', 'semantic-models'];
+    return managementFeatures.some(feature => {
+      const level = permissions[feature];
+      return level === FeatureAccessLevel.READ_WRITE || level === FeatureAccessLevel.ADMIN;
+    });
+  }, [permissions, permissionsLoading]);
+
+  // If user only has consumer access, always show marketplace
+  const effectiveViewMode: ViewMode = hasAnyAccess && !hasManagementAccess ? 'consumer' : viewMode;
+
   return (
     <div className="container mx-auto px-4 py-8">
-      <div className="max-w-2xl mx-auto text-center mb-8">
-        <div className="flex items-center justify-center mb-4">
-          <UnityCatalogLogo className="h-16 w-16" />
-          <h1 className="text-4xl font-bold ml-2">
-            {t('home:title')}
-          </h1>
-        </div>
-        <p className="text-lg text-muted-foreground mb-6">
-          {t('home:tagline')}
-        </p>
-        <div className="mb-8">
-          <SearchBar
-            variant="large"
-            placeholder={t('home:search.placeholder')}
-          />
-        </div>
-      </div>
+      {/* Consumer/Marketplace View */}
+      {effectiveViewMode === 'consumer' && hasAnyAccess && (
+        <MarketplaceView />
+      )}
 
-      <div className="mb-8">
-        <h2 className="text-2xl font-semibold mb-4">{t('home:overview.title')}</h2>
-         {permissionsLoading ? (
-              <div className="flex justify-center items-center h-24 col-span-full">
-                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              </div>
-         ) : filteredSummaryTiles.length > 0 ? (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-            {filteredSummaryTiles.map((tile) => (
-                <Link key={tile.title} to={tile.link} className="block group">
-                <Card className="transition-colors h-full group-hover:bg-accent/50">
-                    <CardContent className="p-6 flex flex-col justify-between h-full">
-                    <div>
-                        <div className="flex items-center justify-between">
-                        <CardTitle className="text-sm font-medium">
-                            {tile.title}
-                        </CardTitle>
-                        <div className="h-4 w-4 text-muted-foreground">
-                            {tile.icon}
-                        </div>
-                        </div>
-                        {tile.loading ? (
-                        <div className="flex justify-center items-center h-16">
-                            <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                        </div>
-                        ) : tile.error ? (
-                        <div className="text-center text-destructive mt-2">
-                            {t('home:overview.error')}
-                        </div>
-                        ) : (
-                        <div className="text-2xl font-bold mt-2">{tile.value}</div>
-                        )}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                        {tile.description}
-                    </p>
-                    </CardContent>
-                </Card>
-                </Link>
-            ))}
+      {/* Management View - original home page content */}
+      {effectiveViewMode === 'management' && (
+        <>
+          <div className="max-w-2xl mx-auto text-center mb-8">
+            <div className="flex items-center justify-center mb-4">
+              <UnityCatalogLogo className="h-16 w-16" />
+              <h1 className="text-4xl font-bold ml-2">
+                {t('home:title')}
+              </h1>
             </div>
-        ) : (
-             <p className="text-muted-foreground text-center col-span-full">
-                 {t('home:overview.noData')}
-             </p>
-         )}
-      </div>
+            <p className="text-lg text-muted-foreground mb-6">
+              {t('home:tagline')}
+            </p>
+            <div className="mb-8">
+              <SearchBar
+                variant="large"
+                placeholder={t('home:search.placeholder')}
+              />
+            </div>
+          </div>
 
-      {isComplianceVisible && (
+      {/* Only show Overview when user has access */}
+      {hasAnyAccess && (
+        <div className="mb-8">
+          <h2 className="text-2xl font-semibold mb-4">{t('home:overview.title')}</h2>
+           {permissionsLoading ? (
+                <div className="flex justify-center items-center h-24 col-span-full">
+                   <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                </div>
+           ) : filteredSummaryTiles.length > 0 ? (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+              {filteredSummaryTiles.map((tile) => (
+                  <Link key={tile.title} to={tile.link} className="block group">
+                  <Card className="transition-colors h-full group-hover:bg-accent/50">
+                      <CardContent className="p-6 flex flex-col justify-between h-full">
+                      <div>
+                          <div className="flex items-center justify-between">
+                          <CardTitle className="text-sm font-medium">
+                              {tile.title}
+                          </CardTitle>
+                          <div className="h-4 w-4 text-muted-foreground">
+                              {tile.icon}
+                          </div>
+                          </div>
+                          {tile.loading ? (
+                          <div className="flex justify-center items-center h-16">
+                              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                          </div>
+                          ) : tile.error ? (
+                          <div className="text-center text-destructive mt-2">
+                              {t('home:overview.error')}
+                          </div>
+                          ) : (
+                          <div className="text-2xl font-bold mt-2">{tile.value}</div>
+                          )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                          {tile.description}
+                      </p>
+                      </CardContent>
+                  </Card>
+                  </Link>
+              ))}
+              </div>
+          ) : (
+               <p className="text-muted-foreground text-center col-span-full">
+                   {t('home:overview.noData')}
+               </p>
+           )}
+        </div>
+      )}
+
+      {hasAnyAccess && isComplianceVisible && (
           <div className="mb-8">
             <Card>
             <CardHeader>
@@ -481,31 +509,43 @@ export default function Home() {
          </div>
        )}
 
-      {/* Message for users with no access */}
-      {!permissionsLoading && !hasAnyAccess && (
-          <Alert variant="default" className="mb-8 bg-blue-50 border-blue-200 text-blue-800">
-            <AlertCircle className="h-4 w-4 !text-blue-600" /> {/* Use ! to force color */}
-            <AlertDescription className="ml-2">
-                 {t('home:noAccess.message')} {t('home:noAccess.action')} <Link to="/settings?tab=roles" className="font-semibold underline hover:text-blue-900">{t('home:noAccess.link')}</Link>.
-            </AlertDescription>
-          </Alert>
+          {/* Role-based main sections - respect role configuration order, only show when user has access */}
+          {hasAnyAccess && orderedSections.map(section => (
+            section === HomeSection.REQUIRED_ACTIONS ? (
+              <RequiredActionsSection key={section} />
+            ) : section === HomeSection.DATA_CURATION ? (
+              <DataCurationSection key={section} />
+            ) : (
+              <DiscoverySection key={section} />
+            )
+          ))}
+
+          {/* Quick Actions and Recent Activity - only show when user has access */}
+          {hasAnyAccess && (
+            <section className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <QuickActions />
+              <RecentActivity />
+            </section>
+          )}
+        </>
       )}
 
-      {/* Role-based main sections - respect role configuration order */}
-      {orderedSections.map(section => (
-        section === HomeSection.REQUIRED_ACTIONS ? (
-          <RequiredActionsSection key={section} />
-        ) : section === HomeSection.DATA_CURATION ? (
-          <DataCurationSection key={section} />
-        ) : (
-          <DiscoverySection key={section} />
-        )
-      ))}
+      {/* Request Role Section - show for users with no access regardless of mode */}
+      {!permissionsLoading && !hasAnyAccess && requestableRoles && requestableRoles.length > 0 && (
+        <div className="mb-8">
+          <RequestRoleSection />
+        </div>
+      )}
 
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <QuickActions />
-        <RecentActivity />
-      </section>
+      {/* Fallback message for users with no access */}
+      {!permissionsLoading && !hasAnyAccess && (!requestableRoles || requestableRoles.length === 0) && (
+        <Alert variant="default" className="mb-8 bg-blue-50 border-blue-200 text-blue-800">
+          <AlertCircle className="h-4 w-4 !text-blue-600" />
+          <AlertDescription className="ml-2">
+            {t('home:noAccess.message')} {t('home:noAccess.contactAdmin', 'Please contact an administrator to request access to the application.')}
+          </AlertDescription>
+        </Alert>
+      )}
     </div>
   );
 }

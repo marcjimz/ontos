@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import TagChip from '@/components/ui/tag-chip';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Plus, Pencil, Trash2, AlertCircle, Database, ChevronDown, Upload, Loader2, Sparkles, KeyRound, Table as TableIcon, Workflow, Bell, BellOff, HelpCircle } from 'lucide-react';
+import { Plus, Pencil, Trash2, AlertCircle, Package, ChevronDown, Upload, Loader2, Sparkles, KeyRound, Table as TableIcon, Workflow, Bell, BellOff, HelpCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ViewModeToggle } from '@/components/common/view-mode-toggle';
 import {
@@ -541,8 +541,14 @@ export default function DataProducts() {
         </Button>
       ),
       cell: ({ row }) => (
-        row.original.status ?
-        <Badge variant={getStatusColor(row.original.status)}>{row.original.status}</Badge> : 'N/A'
+        row.original.status ? (
+          <div className="flex items-center gap-1.5">
+            <Badge variant={getStatusColor(row.original.status)}>{row.original.status}</Badge>
+            {row.original.draftOwnerId && (
+              <Badge variant="secondary" className="bg-blue-100 text-blue-800">Personal Draft</Badge>
+            )}
+          </div>
+        ) : 'N/A'
       ),
     },
     {
@@ -621,7 +627,7 @@ export default function DataProducts() {
     <div className="py-6">
       <div className="mb-6">
         <h1 className="text-3xl font-bold flex items-center gap-2">
-          <Database className="w-8 h-8" />
+          <Package className="w-8 h-8" />
           Data Products
         </h1>
       </div>

@@ -9,10 +9,69 @@
     "semanticModels": "Semantic Models",
     "tags": "Tags"
   },
+  "accessDenied": {
+    "title": "Access Denied",
+    "message": "You do not have permission to access the Settings page. This page is restricted to users with administrative privileges.",
+    "action": "If you believe you should have access, please contact your administrator or ",
+    "returnHome": "return to the home page",
+    "requestRole": " to request an appropriate role."
+  },
   "general": {
     "title": "General Settings",
     "description": "Configure basic application settings",
-    "enableBackgroundJobs": "Enable Background Jobs"
+    "enableBackgroundJobs": "Enable Background Jobs",
+    "workspaceDeploymentPath": {
+      "label": "Workspace Deployment Path",
+      "placeholder": "/Workspace/Users/user@domain.com/ontos-workflows",
+      "help": "Path in Databricks workspace where workflow files are deployed for background jobs."
+    },
+    "unityCatalog": {
+      "title": "Unity Catalog",
+      "help": "Unity Catalog location for storing application data.",
+      "catalog": {
+        "label": "Catalog",
+        "placeholder": "app_data"
+      },
+      "schema": {
+        "label": "Schema",
+        "placeholder": "app_ontos"
+      },
+      "volume": {
+        "label": "Volume",
+        "placeholder": "app_files"
+      }
+    },
+    "auditLog": {
+      "label": "Audit Log Directory",
+      "placeholder": "audit_logs",
+      "help": "Directory where audit log files are stored."
+    },
+    "llm": {
+      "title": "AI / LLM Configuration",
+      "enabled": {
+        "label": "Enable AI Features"
+      },
+      "endpoint": {
+        "label": "LLM Endpoint",
+        "placeholder": "databricks-claude-sonnet-4-5",
+        "help": "Databricks serving endpoint name for the LLM."
+      },
+      "systemPrompt": {
+        "label": "System Prompt",
+        "placeholder": "You are a Data Steward...",
+        "help": "System prompt that defines the AI assistant behavior."
+      },
+      "disclaimer": {
+        "label": "Disclaimer Text",
+        "placeholder": "This feature uses AI to analyze data assets...",
+        "help": "Disclaimer shown to users when using AI features."
+      }
+    },
+    "saveButton": "Save Settings",
+    "messages": {
+      "saveSuccess": "Settings saved successfully",
+      "saveError": "Failed to save settings"
+    }
   },
   "databricks": {
     "title": "Databricks Settings",
@@ -115,7 +174,8 @@
       "general": "General",
       "privileges": "Privileges",
       "permissions": "Permissions",
-      "deployment": "Deployment"
+      "deployment": "Deployment",
+      "accessControl": "Access Control"
     },
     "general": {
       "roleName": "Role Name",
@@ -166,6 +226,20 @@
       },
       "requireApproval": "Require approval for deployments",
       "canApprove": "Can approve deployment requests"
+    },
+    "accessControl": {
+      "requestableBy": {
+        "title": "Who can request this role?",
+        "description": "Select which roles are allowed to request access to this role. Users with these roles will see this role in their requestable roles list."
+      },
+      "approvers": {
+        "title": "Who can approve requests for this role?",
+        "description": "Select which roles can approve access requests for this role. Users with these roles will receive notifications when someone requests this role.",
+        "hint": "If no approvers are selected, requests will be sent to Admin by default."
+      },
+      "noRole": "Users with no role (new users)",
+      "noRolesAvailable": "No other roles available",
+      "defaultApprover": "Default"
     },
     "actions": {
       "cancel": "Cancel",
